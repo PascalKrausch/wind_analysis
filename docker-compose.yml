@@ -1,0 +1,20 @@
+services:
+  timescaledb:
+    image: timescale/timescaledb:latest-pg15
+    container_name: wind_database
+    env_file: .env
+    ports:
+      - "5437:5432"
+    volumes:
+      - ts_data:/var/lib/postgresql/data
+    restart: always
+   
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $POSTGRES_USER -d $POSTGRES_DB"]
+      interval: 1m30s
+      timeout: 30s
+      retries: 5
+      start_period: 30s
+
+volumes:
+  ts_data:
