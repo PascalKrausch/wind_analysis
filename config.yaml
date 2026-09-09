@@ -1,0 +1,21 @@
+locationlist:
+  - name: Husum
+    latitude: 54.4878
+    longitude: 9.0556
+  - name: Harz
+    latitude: 51.7967
+    longitude: 10.6206
+  - name: Schwäbische Alb
+    latitude: 48.5000
+    longitude: 9.5000
+
+timeframe:
+  start: "2015-01-01"
+  end: "2026-09-09"
+  chunk_years: 5 
+
+pipeline:
+  concurrency: 3  # Anzahl paralleler Worker Routines
+  batch_size: 500 # DB Bulk-Insert Schwelle
+  rate_limit_rps: 3 # API Rate Limit (Requests pro Sekunde)
+  

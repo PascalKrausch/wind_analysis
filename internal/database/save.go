@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"wind_analysis/models"
+
+	"github.com/jackc/pgx/v5"
 )
 
 func (db *DB) SaveLocation(ctx context.Context, location models.Location) error {
@@ -56,17 +58,62 @@ func (db *DB) SaveBatchWindData(ctx context.Context, records []models.WindRecord
 	}
 	defer tx.Rollback(ctx)
 
+	// 1) Orte deduplizieren und speichern
+	seenLocations := make(map[string]models.Location)
 	for _, record := range records {
-		err := db.SaveWindData(ctx, record)
+		seenLocations[record.Location.Name] = record.Location
+	}
+
+	for _, location := range seenLocations {
+		_, err := tx.Exec(ctx, `
+            INSERT INTO locations (location_name, latitude, longitude)
+            VALUES ($1, $2, $3)
+            ON CONFLICT (location_name) DO UPDATE
+            SET latitude = EXCLUDED.latitude,
+                longitude = EXCLUDED.longitude
+        `, location.Name, location.Latitude, location.Longitude)
 		if err != nil {
-			return fmt.Errorf("fehler beim Speichern der Winddaten: %w", err)
+			return fmt.Errorf("fehler beim Speichern des Ortes: %w", err)
 		}
 	}
 
-	err = tx.Commit(ctx)
-	if err != nil {
-		return fmt.Errorf("fehler beim Commit der Transaktion: %w", err)
+	// 2) wind_logs per CopyFrom einfügen
+	rows := make([][]any, 0, len(records))
+	for _, record := range records {
+		rows = append(rows, []any{
+			record.Time,
+			record.Location.Name,
+			record.WindData.WindSpeed_10m,
+			record.WindData.WindSpeed_80m,
+			record.WindData.WindSpeed_100m,
+			record.WindData.WindSpeed_120m,
+			record.WindData.WindSpeed_180m,
+			record.WindData.WindSpeed_200m,
+			record.WindData.WindDirection_10m,
+			record.WindData.WindDirection_80m,
+			record.WindData.WindDirection_100m,
+			record.WindData.WindDirection_120m,
+			record.WindData.WindDirection_180m,
+			record.WindData.WindDirection_200m,
+		})
 	}
 
+	_, err = tx.CopyFrom(
+		ctx,
+		pgx.Identifier{"wind_logs"},
+		[]string{
+			"time", "location_name",
+			"wind_speed_10m", "wind_speed_80m", "wind_speed_100m", "wind_speed_120m", "wind_speed_180m", "wind_speed_200m",
+			"wind_direction_10m", "wind_direction_80m", "wind_direction_100m", "wind_direction_120m", "wind_direction_180m", "wind_direction_200m",
+		},
+		pgx.CopyFromRows(rows),
+	)
+	if err != nil {
+		return fmt.Errorf("fehler beim CopyFrom der Winddaten: %w", err)
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("fehler beim Commit der Transaktion: %w", err)
+	}
 	return nil
 }

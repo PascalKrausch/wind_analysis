@@ -3,6 +3,7 @@ package database
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -12,9 +13,23 @@ type DB struct {
 }
 
 func New(ctx context.Context, connString string) (*DB, error) {
-	pool, err := pgxpool.New(ctx, connString)
+	config, err := pgxpool.ParseConfig(connString)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("fehler beim Parsen des Connection-Strings: %w", err)
+	}
+
+	// Performance-Tuning für High-Throughput Pipelines
+	config.MaxConns = 25
+	config.MinConns = 5
+	config.MaxConnIdleTime = 5 * time.Minute
+
+	pool, err := pgxpool.NewWithConfig(ctx, config)
+	if err != nil {
+		return nil, fmt.Errorf("fehler beim Erstellen des Conn-Pools: %w", err)
+	}
+
+	if err := pool.Ping(ctx); err != nil {
+		return nil, fmt.Errorf("datenbank nicht erreichbar: %w", err)
 	}
 
 	return &DB{Conn: pool}, nil
@@ -76,6 +91,18 @@ func (db *DB) InitSchema(ctx context.Context) error {
 			return fmt.Errorf("fehler beim Konvertieren in eine Hypertable: %w", err)
 		}
 		fmt.Println("📊 Tabelle 'wind_logs' erfolgreich in TimescaleDB-Hypertable konvertiert.")
+	}
+
+	// 4. Indizes für schnellere Abfragen
+	indexes := []string{
+		`CREATE INDEX IF NOT EXISTS idx_wind_logs_time ON wind_logs (time DESC);`,
+		`CREATE INDEX IF NOT EXISTS idx_wind_logs_location_time ON wind_logs (location_name, time DESC);`,
+	}
+
+	for _, idx := range indexes {
+		if _, err := db.Conn.Exec(ctx, idx); err != nil {
+			return fmt.Errorf("fehler beim Erstellen eines Indexes: %w", err)
+		}
 	}
 
 	fmt.Println("✅ Datenbank-Schema erfolgreich initialisiert.")

@@ -2,17 +2,18 @@ package models
 
 import "time"
 
-// Datenstruktur für die API-Antwort von Open-Meteo
-type WindData struct {
-	// Windgeschwindigkeiten auf verschiedenen Höhen
-	WindSpeed_10m   *float64 `json:"wind_speed_10m"`
-	WindSpeed_80m   *float64 `json:"wind_speed_80m"`
-	WindSpeed_100m  *float64 `json:"wind_speed_100m"`
-	WindSpeed_120m  *float64 `json:"wind_speed_120m"`
-	WindSpeed_180m  *float64 `json:"wind_speed_180m"`
-	WindSpeed_200m  *float64 `json:"wind_speed_200m"`
+// -----------------------------------------------------------------------------
+// 1. API & Core Domain Models (Bestehend)
+// -----------------------------------------------------------------------------
 
-	// Windrichtungen auf verschiedenen Höhen
+type WindData struct {
+	WindSpeed_10m  *float64 `json:"wind_speed_10m"`
+	WindSpeed_80m  *float64 `json:"wind_speed_80m"`
+	WindSpeed_100m *float64 `json:"wind_speed_100m"`
+	WindSpeed_120m *float64 `json:"wind_speed_120m"`
+	WindSpeed_180m *float64 `json:"wind_speed_180m"`
+	WindSpeed_200m *float64 `json:"wind_speed_200m"`
+
 	WindDirection_10m  *float64 `json:"wind_direction_10m"`
 	WindDirection_80m  *float64 `json:"wind_direction_80m"`
 	WindDirection_100m *float64 `json:"wind_direction_100m"`
@@ -21,28 +22,19 @@ type WindData struct {
 	WindDirection_200m *float64 `json:"wind_direction_200m"`
 }
 
-// Location hält die geografischen Koordinaten eines Ortes
 type Location struct {
-	Name      string  `json:"name"`
-	Latitude  float64 `json:"latitude"`
-	Longitude float64 `json:"longitude"`
+	ID        int64   `json:"id,omitempty"`
+	Name      string  `json:"name" yaml:"name"`
+	Latitude  float64 `json:"latitude" yaml:"latitude"`
+	Longitude float64 `json:"longitude" yaml:"longitude"`
 }
 
-// Datenstruktur für die Speicherung von Winddaten in der Datenbank
 type WindRecord struct {
 	Time     time.Time `json:"time"`
 	Location Location  `json:"location"`
 	WindData WindData  `json:"wind_data"`
 }
 
-// LocationData hält die Winddaten für eine bestimmte Location über die Zeit hinweg, um sie in der Datenbank zu speichern
-type LocationData struct {
-	Name       string               `json:"name"`
-	Times      []time.Time          `json:"times"`
-	Parameters map[string][]float64 `json:"parameters"`
-}
-
-// OpenMeteoResponse repräsentiert die API-Antwort von Open-Meteo
 type OpenMeteoResponse struct {
 	Latitude  float64    `json:"latitude"`
 	Longitude float64    `json:"longitude"`
@@ -50,19 +42,58 @@ type OpenMeteoResponse struct {
 	Hourly    HourlyData `json:"hourly"`
 }
 
-// HourlyData enthält die stündlichen Wetterdaten
 type HourlyData struct {
-	Time                 []string  `json:"time"`
-	WindSpeed_10m        []float64 `json:"wind_speed_10m"`
-	WindSpeed_80m        []float64 `json:"wind_speed_80m"`
-	WindSpeed_100m       []float64 `json:"wind_speed_100m,omitempty"`
-	WindSpeed_120m       []float64 `json:"wind_speed_120m"`
-	WindSpeed_180m       []float64 `json:"wind_speed_180m"`
-	WindSpeed_200m       []float64 `json:"wind_speed_200m,omitempty"`
-	WindDirection_10m    []float64 `json:"wind_direction_10m"`
-	WindDirection_80m    []float64 `json:"wind_direction_80m"`
-	WindDirection_100m   []float64 `json:"wind_direction_100m,omitempty"`
-	WindDirection_120m   []float64 `json:"wind_direction_120m"`
-	WindDirection_180m   []float64 `json:"wind_direction_180m"`
-	WindDirection_200m   []float64 `json:"wind_direction_200m,omitempty"`
+	Time               []string  `json:"time"`
+	WindSpeed_10m      []float64 `json:"wind_speed_10m"`
+	WindSpeed_80m      []float64 `json:"wind_speed_80m"`
+	WindSpeed_100m     []float64 `json:"wind_speed_100m,omitempty"`
+	WindSpeed_120m     []float64 `json:"wind_speed_120m"`
+	WindSpeed_180m     []float64 `json:"wind_speed_180m"`
+	WindSpeed_200m     []float64 `json:"wind_speed_200m,omitempty"`
+	WindDirection_10m  []float64 `json:"wind_direction_10m"`
+	WindDirection_80m  []float64 `json:"wind_direction_80m"`
+	WindDirection_100m []float64 `json:"wind_direction_100m,omitempty"`
+	WindDirection_120m []float64 `json:"wind_direction_120m"`
+	WindDirection_180m []float64 `json:"wind_direction_180m"`
+	WindDirection_200m []float64 `json:"wind_direction_200m,omitempty"`
+}
+
+// -----------------------------------------------------------------------------
+// 2. Pipeline & Worker Architecture Models (Neu)
+// -----------------------------------------------------------------------------
+
+// FetchTask repräsentiert eine atomare Arbeitseinheit für die Worker-Pipeline
+type FetchTask struct {
+	ID           string    `json:"id"`
+	LocationName string    `json:"location_name"`
+	Latitude     float64   `json:"latitude"`
+	Longitude    float64   `json:"longitude"`
+	StartDate    time.Time `json:"start_date"`
+	EndDate      time.Time `json:"end_date"`
+	RetryCount   int       `json:"retry_count"`
+}
+
+// TaskResult dient dem Monitoring und Logging der verarbeiteten Jobs
+type TaskResult struct {
+	Task         FetchTask `json:"task"`
+	RecordCount  int       `json:"record_count"`
+	DurationMs   int64     `json:"duration_ms"`
+	Err          error     `json:"-"`
+	ErrorMessage string    `json:"error_message,omitempty"`
+}
+
+// Config hält die Parameter für Raster-Generierung und Worker-Pipeline
+type Config struct {
+	LocationList []Location `yaml:"locationlist"`
+
+	Timeframe struct {
+		Start      string `yaml:"start"`
+		End        string `yaml:"end"`
+		ChunkYears int    `yaml:"chunk_years"`
+	} `yaml:"timeframe"`
+	Pipeline struct {
+		Concurrency  int `yaml:"concurrency"`
+		BatchSize    int `yaml:"batch_size"`
+		RateLimitRPS int `yaml:"rate_limit_rps"`
+	} `yaml:"pipeline"`
 }
