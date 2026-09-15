@@ -1,0 +1,37 @@
+
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>Awesome go-echarts</title>
+    <script src="https://go-echarts.github.io/go-echarts-assets/assets/echarts.min.js"></script>
+    <script src="https://go-echarts.github.io/go-echarts-assets/assets/themes/westeros.js"></script>
+
+<style>
+html, body {
+	margin: 0;
+	padding: 0;
+	width: 100%;
+}
+body > div:first-child {
+	width: 100% !important;
+	min-height: 700px !important;
+}
+</style>
+</head>
+
+<body><div class="container">
+    <div class="item" id="CnGbTOnNXScb" style="width:100%;height:800px;"></div>
+</div><script type="text/javascript">
+    "use strict";
+    let goecharts_CnGbTOnNXScb = echarts.init(document.getElementById('CnGbTOnNXScb'), "westeros", { renderer: "canvas" });
+    let option_CnGbTOnNXScb = {"legend":{"show":true},"series":[{"name":"Skewness","type":"bar","data":[{"value":1.8787689905077538},{"value":1.2725025500701885},{"value":0.8117341190513452},{"value":1.2311480713235727}]},{"name":"Kurtosis","type":"bar","data":[{"value":16.609109412360805},{"value":4.190311892632663},{"value":5.224746476648253},{"value":5.09643025548914}]}],"title":{"text":"Fehlerverteilung je Höhe","subtext":"Skewness & Kurtosis (Harz)"},"toolbox":{"show":true,"feature":{"saveAsImage":{"show":true,"title":"Speichern"},"dataZoom":{"show":true,"icon":null,"title":{"back":"Zurück","zoom":"Zoom"}},"restore":{"show":true,"title":"Reset"}}},"tooltip":{"show":true,"trigger":"axis"},"xAxis":[{"name":"Höhe [m]","data":["80","120","180","200"]}],"yAxis":[{"name":"Wert"}]}
+
+    goecharts_CnGbTOnNXScb.setOption(option_CnGbTOnNXScb);
+</script>
+<style>
+    .container {margin-top:30px; display: flex;justify-content: center;align-items: center;}
+    .item {margin: auto;}
+</style>
+</body>
+</html>
