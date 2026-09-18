@@ -8,7 +8,6 @@ import (
 	"wind_analysis/internal/analysis/distribution"
 	"wind_analysis/internal/analysis/fitting"
 	"wind_analysis/internal/analysis/interpolation"
-	"wind_analysis/internal/analysis/statistics"
 	"wind_analysis/internal/analysis/visualization"
 
 	"wind_analysis/internal/database"
@@ -194,7 +193,7 @@ func RunLocationComparison(ctx context.Context, db *database.DB, config Config, 
 		}
 
 		distributionComparisonPath := utils.BuildOutputPath(config.OutputDir, "distribution_location_comparison.html")
-		if err := visualization.PlotDistributionComparisonOverview(vizInputs, distributionComparisonPath); err != nil {
+		if err := visualization.PlotDistributionDashboard(vizInputs, distributionComparisonPath); err != nil {
 			fmt.Printf("⚠️ Fehler beim Erstellen des Verteilungsvergleichs: %v\n", err)
 		} else {
 			fmt.Printf("🌬️ Verteilungsvergleich gespeichert: %s\n", distributionComparisonPath)
@@ -227,10 +226,10 @@ func runValidationMetrics(config Config, records []models.WindRecord, exponents 
 	fmt.Printf("📋 Validierungsmetriken (Tabelle) gespeichert: %s\n", metricsPath)
 
 	// Error-Shape-Chart zeichnen
-	heights, errorStats := extractErrorStatsForLocation(validationByLocation, config.LocationName)
+	heights := extractHeightsForLocation(validationByLocation, config.LocationName)
 	if len(heights) > 0 {
 		errorShapePath := utils.BuildOutputPath(config.OutputDir, fmt.Sprintf("validation_error_shape_%s.html", utils.SanitizeForFilename(config.LocationName)))
-		if err := visualization.PlotErrorDistributionShape(config.LocationName, heights, errorStats, errorShapePath); err != nil {
+		if err := visualization.PlotErrorDistributionShapeByHeight(validationByLocation, config.LocationName, errorShapePath); err != nil {
 			return fmt.Errorf("Error-Shape-Chart (%s): %w", config.LocationName, err)
 		}
 		fmt.Printf("📊 Error-Shape-Chart gespeichert: %s\n", errorShapePath)
@@ -267,10 +266,10 @@ func runGlobalValidationMetrics(config Config, allRecordsFrom2022 []models.WindR
 	for _, loc := range locations {
 		fmt.Printf("  ✅ Metriken vorhanden für: %s\n", loc)
 
-		heights, errorStats := extractErrorStatsForLocation(validationByLocation, loc)
+		heights := extractHeightsForLocation(validationByLocation, loc)
 		if len(heights) > 0 {
 			errorShapePath := utils.BuildOutputPath(config.OutputDir, fmt.Sprintf("validation_error_shape_%s.html", utils.SanitizeForFilename(loc)))
-			if err := visualization.PlotErrorDistributionShape(loc, heights, errorStats, errorShapePath); err != nil {
+			if err := visualization.PlotErrorDistributionShapeByHeight(validationByLocation, loc, errorShapePath); err != nil {
 				return fmt.Errorf("globales Error-Shape-Chart (%s): %w", loc, err)
 			}
 			fmt.Printf("  📊 Error-Shape-Chart gespeichert: %s\n", errorShapePath)
@@ -346,10 +345,10 @@ func mapValidationToMetricRows(validation map[string]map[float64]interpolation.V
 	return rows
 }
 
-func extractErrorStatsForLocation(validation map[string]map[float64]interpolation.ValidationResult, loc string) ([]float64, []statistics.Summary) {
+func extractHeightsForLocation(validation map[string]map[float64]interpolation.ValidationResult, loc string) []float64 {
 	heightMap, ok := validation[loc]
 	if !ok || len(heightMap) == 0 {
-		return nil, nil
+		return nil
 	}
 
 	heights := make([]float64, 0, len(heightMap))
@@ -358,12 +357,7 @@ func extractErrorStatsForLocation(validation map[string]map[float64]interpolatio
 	}
 	sort.Float64s(heights)
 
-	stats := make([]statistics.Summary, len(heights))
-	for i, h := range heights {
-		stats[i] = heightMap[h].ErrorSummary
-	}
-
-	return heights, stats
+	return heights
 }
 
 func mapFittingToVizInput(p fitting.AnalysisPlotInput) visualization.DistributionPlotInput {
@@ -371,8 +365,8 @@ func mapFittingToVizInput(p fitting.AnalysisPlotInput) visualization.Distributio
 		SeriesName:   p.SeriesName,
 		LocationName: p.LocationName,
 		HeightM:      p.HeightM,
-		Distribution: p.FitterName,
-		ModelName:    p.Model,
+		Distribution: p.Model,
+		ModelName:    p.FitterName,
 		Metrics:      p.Metrics,
 		Histogram:    p.Histogram,
 		EmpiricalCDF: p.EmpiricalCDF,
