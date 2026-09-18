@@ -36,8 +36,7 @@ func NewWeibullDashboard(inputs []WeibullPlotInput) *components.Page {
 
 	for _, in := range inputs {
 		page.AddCharts(
-			BuildWeibullHistogramChart(in),
-			BuildWeibullPDFLine(in),
+			BuildWeibullHistogramPDFChart(in),
 			BuildWeibullCDFChart(in),
 		)
 	}
@@ -84,27 +83,77 @@ func savePage(page *components.Page, outputPath string) error {
 	return page.Render(f)
 }
 
-func BuildWeibullHistogramChart(in WeibullPlotInput) *charts.Bar {
+// SavePage speichert eine go-echarts Page in eine Datei (public für generische Nutzung).
+func SavePage(page *components.Page, outputPath string) error {
+	return savePage(page, outputPath)
+}
+
+func BuildWeibullHistogramPDFChart(in WeibullPlotInput) *charts.Bar {
 	bar := charts.NewBar()
 	bar.SetGlobalOptions(
 		charts.WithTitleOpts(opts.Title{
-			Title:    chartTitle("Weibull Histogramm", in),
-			Subtitle: "Empirische Klassenhäufigkeit",
+			Title:    chartTitle("Weibull Histogramm + PDF", in),
+			Subtitle: "Histogramm (Anzahl) und Modell-PDF (Dichte) im selben Koordinatensystem",
 		}),
-		charts.WithTooltipOpts(opts.Tooltip{Show: opts.Bool(true)}),
+		charts.WithTooltipOpts(opts.Tooltip{Show: opts.Bool(true), Trigger: "axis"}),
 		charts.WithLegendOpts(opts.Legend{Show: opts.Bool(true)}),
-		charts.WithYAxisOpts(opts.YAxis{Name: "Anzahl"}),
 		charts.WithXAxisOpts(opts.XAxis{Name: "Windgeschwindigkeit [m/s]"}),
+		charts.WithYAxisOpts(opts.YAxis{Name: "Anzahl"}),
+	)
+	bar.ExtendYAxis(opts.YAxis{Name: "Dichte"})
+
+	x, centers := histogramXAxisAndCenters(in.Histogram)
+
+	hist := make([]opts.BarData, 0, len(in.Histogram))
+	for _, b := range in.Histogram {
+		hist = append(hist, opts.BarData{Value: b.Count})
+	}
+	bar.SetXAxis(x).AddSeries("Histogramm", hist)
+
+	pdf := densityAtXVals(in.FittedPDF, centers)
+	line := charts.NewLine()
+	line.SetXAxis(x).AddSeries(
+		"Weibull-PDF",
+		toLineData(pdf),
+		charts.WithLineChartOpts(opts.LineChart{YAxisIndex: 1, Smooth: opts.Bool(true)}),
 	)
 
-	x := make([]string, 0, len(in.Histogram))
-	y := make([]opts.BarData, 0, len(in.Histogram))
-	for _, b := range in.Histogram {
-		x = append(x, fmt.Sprintf("%.2f-%.2f", b.Min, b.Max))
-		y = append(y, opts.BarData{Value: b.Count})
-	}
+	bar.Overlap(line)
+	return bar
+}
 
-	bar.SetXAxis(x).AddSeries("Histogramm", y)
+// BuildDistributionHistogramPDFChart erstellt ein Histogramm + PDF Chart für jede Verteilung.
+func BuildDistributionHistogramPDFChart(in DistributionPlotInput) *charts.Bar {
+	bar := charts.NewBar()
+	bar.SetGlobalOptions(
+		charts.WithTitleOpts(opts.Title{
+			Title:    DistributionChartTitle(fmt.Sprintf("%s Histogramm + PDF", in.ModelName), in),
+			Subtitle: "Histogramm (Anzahl) und Modell-PDF (Dichte) im selben Koordinatensystem",
+		}),
+		charts.WithTooltipOpts(opts.Tooltip{Show: opts.Bool(true), Trigger: "axis"}),
+		charts.WithLegendOpts(opts.Legend{Show: opts.Bool(true)}),
+		charts.WithXAxisOpts(opts.XAxis{Name: "Wert"}),
+		charts.WithYAxisOpts(opts.YAxis{Name: "Anzahl"}),
+	)
+	bar.ExtendYAxis(opts.YAxis{Name: "Dichte"})
+
+	x, centers := histogramXAxisAndCenters(in.Histogram)
+
+	hist := make([]opts.BarData, 0, len(in.Histogram))
+	for _, b := range in.Histogram {
+		hist = append(hist, opts.BarData{Value: b.Count})
+	}
+	bar.SetXAxis(x).AddSeries("Histogramm", hist)
+
+	pdf := densityAtXVals(in.FittedPDF, centers)
+	line := charts.NewLine()
+	line.SetXAxis(x).AddSeries(
+		fmt.Sprintf("%s-PDF", in.ModelName),
+		toLineData(pdf),
+		charts.WithLineChartOpts(opts.LineChart{YAxisIndex: 1, Smooth: opts.Bool(true)}),
+	)
+
+	bar.Overlap(line)
 	return bar
 }
 
@@ -128,6 +177,31 @@ func BuildWeibullCDFChart(in WeibullPlotInput) *charts.Line {
 	line.SetXAxis(x).
 		AddSeries("Empirisch", toLineData(alignSeries(x, empX, empY))).
 		AddSeries("Weibull-Modell", toLineData(alignSeries(x, modX, modY)))
+
+	return line
+}
+
+// BuildDistributionCDFChart erstellt ein CDF Chart für jede Verteilung.
+func BuildDistributionCDFChart(in DistributionPlotInput) *charts.Line {
+	line := charts.NewLine()
+	line.SetGlobalOptions(
+		charts.WithTitleOpts(opts.Title{
+			Title:    DistributionChartTitle(fmt.Sprintf("%s CDF", in.ModelName), in),
+			Subtitle: "Empirische CDF vs. Modell-CDF",
+		}),
+		charts.WithTooltipOpts(opts.Tooltip{Show: opts.Bool(true), Trigger: "axis"}),
+		charts.WithLegendOpts(opts.Legend{Show: opts.Bool(true)}),
+		charts.WithXAxisOpts(opts.XAxis{Name: "Wert"}),
+		charts.WithYAxisOpts(opts.YAxis{Name: "Kumulative Wahrscheinlichkeit", Min: 0, Max: 1}),
+	)
+
+	empX, empY := cdfSeries(in.EmpiricalCDF)
+	modX, modY := cdfSeries(in.FittedCDF)
+	x := mergeSortedXAxis(empX, modX)
+
+	line.SetXAxis(x).
+		AddSeries("Empirisch", toLineData(alignSeries(x, empX, empY))).
+		AddSeries(fmt.Sprintf("%s-Modell", in.ModelName), toLineData(alignSeries(x, modX, modY)))
 
 	return line
 }
@@ -156,6 +230,42 @@ func BuildWeibullMetricsChart(inputs []WeibullPlotInput) *charts.Line {
 		bic = append(bic, opts.LineData{Value: in.Analysis.BIC})
 		ks = append(ks, opts.LineData{Value: in.Analysis.KSStatistic})
 		rmse = append(rmse, opts.LineData{Value: in.Analysis.RMSE})
+	}
+
+	line.SetXAxis(x).
+		AddSeries("AIC", aic).
+		AddSeries("BIC", bic).
+		AddSeries("KS", ks).
+		AddSeries("RMSE", rmse)
+
+	return line
+}
+
+// BuildDistributionMetricsChart erstellt ein Metrics Chart für jede Verteilung.
+func BuildDistributionMetricsChart(inputs []DistributionPlotInput) *charts.Line {
+	line := charts.NewLine()
+	line.SetGlobalOptions(
+		charts.WithTitleOpts(opts.Title{
+			Title:    "Verteilungs Fit-Güte",
+			Subtitle: "AIC, BIC, KS und RMSE je Serie",
+		}),
+		charts.WithTooltipOpts(opts.Tooltip{Show: opts.Bool(true), Trigger: "axis"}),
+		charts.WithLegendOpts(opts.Legend{Show: opts.Bool(true)}),
+		charts.WithXAxisOpts(opts.XAxis{Name: "Serie"}),
+	)
+
+	x := make([]string, 0, len(inputs))
+	aic := make([]opts.LineData, 0, len(inputs))
+	bic := make([]opts.LineData, 0, len(inputs))
+	ks := make([]opts.LineData, 0, len(inputs))
+	rmse := make([]opts.LineData, 0, len(inputs))
+
+	for _, in := range inputs {
+		x = append(x, DistributionShortLabel(in))
+		aic = append(aic, opts.LineData{Value: in.Metrics.AIC})
+		bic = append(bic, opts.LineData{Value: in.Metrics.BIC})
+		ks = append(ks, opts.LineData{Value: in.Metrics.KSStatistic})
+		rmse = append(rmse, opts.LineData{Value: in.Metrics.RMSE})
 	}
 
 	line.SetXAxis(x).
@@ -206,7 +316,7 @@ func BuildWeibullDistributionOverview(inputs []WeibullPlotInput) *components.Pag
 
 	for _, in := range inputs {
 		page.AddCharts(
-			BuildWeibullHistogramChart(in),
+			BuildWeibullHistogramPDFChart(in),
 			BuildWeibullCDFChart(in),
 		)
 	}
@@ -382,4 +492,80 @@ func normalizeSeries(v float64) float64 {
 		return 0
 	}
 	return v
+}
+
+func histogramXAxisAndCenters(hist []statistics.Bin) ([]string, []float64) {
+	x := make([]string, 0, len(hist))
+	centers := make([]float64, 0, len(hist))
+	for _, b := range hist {
+		x = append(x, fmt.Sprintf("%.2f-%.2f", b.Min, b.Max))
+		centers = append(centers, (b.Min+b.Max)/2.0)
+	}
+	return x, centers
+}
+
+func densityAtXVals(points []statistics.DensityPoint, xVals []float64) []float64 {
+	out := make([]float64, len(xVals))
+	if len(points) == 0 {
+		return out
+	}
+
+	sorted := append([]statistics.DensityPoint(nil), points...)
+	sort.Slice(sorted, func(i, j int) bool { return sorted[i].X < sorted[j].X })
+
+	for i, x := range xVals {
+		if x <= sorted[0].X {
+			out[i] = normalizeSeries(sorted[0].Y)
+			continue
+		}
+		last := len(sorted) - 1
+		if x >= sorted[last].X {
+			out[i] = normalizeSeries(sorted[last].Y)
+			continue
+		}
+
+		for j := 1; j < len(sorted); j++ {
+			left, right := sorted[j-1], sorted[j]
+			if x >= left.X && x <= right.X {
+				dx := right.X - left.X
+				if dx == 0 {
+					out[i] = normalizeSeries(left.Y)
+					break
+				}
+				t := (x - left.X) / dx
+				out[i] = normalizeSeries(left.Y + t*(right.Y-left.Y))
+				break
+			}
+		}
+	}
+
+	return out
+}
+
+func cdfAtUpperBounds(points []statistics.CDFPoint, xVals []float64) []float64 {
+	out := make([]float64, len(xVals))
+	if len(points) == 0 {
+		return out
+	}
+
+	sorted := append([]statistics.CDFPoint(nil), points...)
+	sort.Slice(sorted, func(i, j int) bool { return sorted[i].X < sorted[j].X })
+
+	idx := 0
+	current := 0.0
+	for i, x := range xVals {
+		for idx < len(sorted) && sorted[idx].X <= x {
+			current = normalizeSeries(sorted[idx].Y)
+			idx++
+		}
+		if current < 0 {
+			current = 0
+		}
+		if current > 1 {
+			current = 1
+		}
+		out[i] = current
+	}
+
+	return out
 }

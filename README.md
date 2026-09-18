@@ -4,7 +4,7 @@
 
 ## 🎯 Projektziel
 
-Statistische Analyse von Windgeschwindigkeitsdaten mittels Weibull-Verteilung, Parameterschätzung und Performance-optimierte Datenverarbeitung.
+Statistische Analyse von Windgeschwindigkeitsdaten mittels generischer Verteilungsanalyse, automatischer Modellauswahl und Performance-optimierter Datenverarbeitung.
 
 ## 🏗️ Architektur
 
@@ -20,10 +20,18 @@ wind-analysis/
 │   └── analysis/
 │       ├── interpolation/   # Power-Law Windprofil-Interpolation
 │       ├── statistics/      # Deskriptive Statistik, Korrelation, Verteilungen
-│       ├── distribution/    # Weibull-Verteilung & Parameterschätzung
+│       ├── distribution/    # Generische Verteilungsanalyse (Weibull, Gamma, Log-Normal)
+│       │   ├── types.go            # Interface-Definitionen (ContinuousDistribution, Fitter)
+│       │   ├── weibull.go          # Weibull-Verteilung (mit Interface-Implementierung)
+│       │   ├── gamma.go            # Gamma-Verteilung
+│       │   ├── log_normal.go       # Log-Normal-Verteilung
+│       │   ├── fitter.go           # Automatische Modellauswahl (SelectBestModel)
+│       │   └── data_cleaning.go    # Generische Datenbereinigung
 │       ├── validation/      # Validierungs-Orchestrierung
-│       ├── weibull/         # Weibull-Verarbeitungslogik
+│       ├── weibull/         # Legacy Weibull-Verarbeitungslogik (wind-spezifisch)
 │       └── visualization/   # Chart-Erstellung (go-echarts)
+│           ├── distribution_plot.go # Generische Verteilungs-Visualisierung
+│           └── weibull_plot.go      # Weibull-spezifische Visualisierung
 ├── pipeline/            # Concurrency-Engine für parallele Datenabfrage
 ├── models/              # Datenstrukturen & Konfiguration
 ├── config.yaml          # Standorte & Pipeline-Konfiguration
@@ -36,10 +44,87 @@ Das Projekt folgt etablierten Software-Architektur-Patterns:
 
 - **Layered Architecture**: Klare Trennung zwischen Entry Points, Business Logic und Data Access
 - **Domain-Driven Design**: Packages nach fachlichen Domänen strukturiert
+- **Interface-Based Design**: Generische Interfaces für Verteilungen (`ContinuousDistribution`, `Fitter`)
+- **Strategy Pattern**: Austauschbare Verteilungs-Implementierungen und Fitting-Algorithmen
 - **Dependency Injection**: Konstruktoren nehmen Abhängigkeiten als Parameter für Testbarkeit
 - **Context-First Pattern**: Alle asynchronen Funktionen verwenden `context.Context`
 - **Pipeline Pattern**: Fan-Out/Fan-In für parallele Datenverarbeitung
 - **Repository Pattern**: Datenbankzugriffe gekapselt in dedizierten Packages
+- **Separation of Concerns**: Datenbereinigung, Fitting und Visualisierung sind getrennt
+
+## 🔬 Architektur-Details: Generische Verteilungsanalyse
+
+Das Projekt verwendet eine moderne, interface-basierte Architektur für die statistische Analyse:
+
+### Core Interfaces
+
+```go
+// ContinuousDistribution beschreibt eine kontinuierliche Wahrscheinlichkeitsverteilung
+type ContinuousDistribution interface {
+    PDF(x float64) float64
+    CDF(x float64) float64
+    LogPDF(x float64) float64
+    Params() []float64
+}
+
+// Fitter beschreibt eine Schnittstelle zur Parameterschätzung
+type Fitter interface {
+    Fit(data []float64) (ContinuousDistribution, error)
+    Name() string
+}
+```
+
+### Aktuelle Implementierungen
+
+- **Weibull**: `Weibull` struct + `WeibullFitter` (MLE mit Location-Parameter)
+- **Gamma**: `Gamma` struct + `GammaFitter` (Momentenmethode + Thom-Näherung)
+- **Log-Normal**: `LogNormal` struct + `LogNormalFitter` (Analytisches MLE)
+
+### Automatische Modellauswahl
+
+```go
+bestDist, metrics, err := distribution.SelectBestModel(data)
+// Wählt automatisch das beste Modell basierend auf AIC
+```
+
+### Generische Utilities
+
+- **Datenbereinigung**: `CleanData()`, `CleanDataWithZero()`, `IsFinite()`
+- **Statistik**: `Summarize()`, `SortedCopy()`
+- **Validierung**: `EvaluateFit()` berechnet AIC, BIC, KS-Test, RMSE
+- **Visualisierung**: `BuildDistributionCurves()`, `NewDistributionDashboard()`
+
+### Erweiterbarkeit
+
+Neue Verteilungen können einfach hinzugefügt werden durch:
+1. Implementierung von `ContinuousDistribution` Interface
+2. Implementierung von `Fitter` Interface
+3. Hinzufügen zum `fitters` Array in `SelectBestModel()`
+
+### Rückwärtskompatibilität
+
+Die Architektur behält die Rückwärtskompatibilität zum bestehenden Weibull-spezifischen Code:
+- Legacy-Funktionen wie `WeibullPDF()`, `WeibullCDF()` sind weiterhin verfügbar
+- `WeibullParams`, `WeibullAnalysisResult` etc. werden für Kompatibilität beibehalten
+- Der `weibull/` Processor funktioniert weiterhin mit wind-spezifischen Daten
+
+### Architektur-Refactoring
+
+Der Übergang von Weibull-spezifischer zu generischer Architektur erfolgte in mehreren Schritten:
+
+1. **Interface-Definition**: Einführung von `ContinuousDistribution` und `Fitter` Interfaces
+2. **Weibull-Entkopplung**: `Weibull` struct implementiert `ContinuousDistribution`, `WeibullFitter` implementiert `Fitter`
+3. **Datenbereinigung**: Extraktion von `cleanWindSpeedData()` zu generischem `CleanData()`
+4. **Visualisierung**: Einführung von `DistributionPlotInput` und generischen Chart-Funktionen
+5. **Andere Verteilungen**: Gamma und Log-Normal implementierten bereits das generische Muster
+
+### Vorteile der neuen Architektur
+
+- **Erweiterbarkeit**: Neue Verteilungen können ohne Änderung bestehenden Codes hinzugefügt werden
+- **Wiederverwendbarkeit**: Generische Funktionen (Datenbereinigung, Validierung, Visualisierung) für alle Verteilungen
+- **Testbarkeit**: Interfaces erleichtern Unit-Testing mit Mocks
+- **Wartbarkeit**: Klare Trennung der Zuständigkeiten und konsistente APIs
+- **Flexibilität**: Automatische Modellauswahl ermöglicht datengetriebene Entscheidungen
 
 ## 🚀 Funktionalität
 
@@ -52,17 +137,24 @@ Das Projekt folgt etablierten Software-Architektur-Patterns:
 - **Power-Law Interpolation**: Windprofil-Interpolation zwischen verschiedenen Höhen (Hellmann-Exponenten)
 - **Batch-Verarbeitung**: Effizientes Speichern großer Datensätze via PostgreSQL COPY
 - **Datenbank-Speicherung**: PostgreSQL mit TimescaleDB für effiziente Zeitreihen-Abfragen
-- **Weibull-Parameterschätzung**: Shape (k), Scale (λ) und Location (μ) Parameterschätzung via MLE
+- **Generische Verteilungsanalyse**: Interface-basierte Architektur für verschiedene Verteilungen
+- **Unterstützte Verteilungen**: Weibull, Gamma, Log-Normal (erweiterbar)
+- **Automatische Modellauswahl**: `SelectBestModel()` wählt automatisch das beste Modell basierend auf AIC
+- **Parameterschätzung**: MLE-basierte Parameterschätzung für alle Verteilungen
 - **Goodness-of-Fit Tests**: KS-Test, AIC, BIC, RMSE für Modellvalidierung
+- **Generische Datenbereinigung**: `CleanData()`, `Summarize()`, `SortedCopy()` für alle Verteilungen
+- **Generische Visualisierung**: `BuildDistributionCurves()`, `NewDistributionDashboard()` für jede Verteilung
 - **Statistische Analyse**: Deskriptive Statistik, Korrelation (Pearson, Spearman, Kendall), Histogramme
 - **Visualisierung**: Interaktive HTML-Charts (Histogramme, PDF/CDF, Heatmaps, Vergleiche)
 - **Validierung**: Power-Law Modellvalidierung mit Fehleranalyse
 
 ### In Planung
 
+- **Erweiterte Verteilungen**: Rayleigh, Normal, Log-Logistic, GEV für Extremwertanalyse
 - **Windenergie-Berechnung**: Theoretische Energieerträge und Capacity Factors
 - **Statistische Vergleiche**: Wasserstein-Distanz für zeitliche Veränderungen
 - **Erweiterte Visualisierungen**: Windrosen, Zeitreihen-Dashboards
+- **Processor-Modell-Umbau**: Migration von weibull/ zu generischem distribution/ Processor
 
 ## 📋 Voraussetzungen
 
@@ -148,10 +240,12 @@ Der Analyser erstellt folgende Ausgaben im `./output` Verzeichnis:
 - **Concurrency Patterns**: Fan-Out/Fan-In Pipeline mit Worker-Pools
 - **API-Integration**: Rate-Limiting, Retry-Logik, Fallback-Strategien
 - **Datenbank-Design**: TimescaleDB Hypertables für effiziente Zeitreihen
-- **Numerische Verfahren**: Power-Law Interpolation für Windprofile, Weibull-Parameterschätzung
-- **Statistische Analyse**: Weibull-Verteilung, Parameterschätzung, Goodness-of-Fit Tests
-- **Visualisierung**: Interaktive Charts mit go-echarts
+- **Numerische Verfahren**: Power-Law Interpolation für Windprofile, MLE-Parameterschätzung
+- **Statistische Analyse**: Verteilungsanalyse, Parameterschätzung, Goodness-of-Fit Tests
+- **Interface-Based Design**: Generische Interfaces für erweiterbare Architektur
+- **Strategy Pattern**: Austauschbare Algorithmen und Implementierungen
 - **Software-Architektur**: Layered Architecture, Dependency Injection, Code-Refactoring
+- **Separation of Concerns**: Modularisierung und Entkopplung von Komponenten
 
 ## 🛠️ Tech Stack
 
@@ -160,8 +254,10 @@ Der Analyser erstellt folgende Ausgaben im `./output` Verzeichnis:
 - **Open-Meteo API**: Wetterdatenquelle (Archive, Historical Forecast, Forecast)
 - **pgx/v5**: PostgreSQL Treiber
 - **gonum/stat**: Statistische Funktionen (Korrelation, Quantile, etc.)
+- **gonum/mathext**: Spezielle mathematische Funktionen (Gamma, Digamma, etc.)
 - **go-echarts**: Interaktive Chart-Bibliothek
 - **gopkg.in/yaml.v3**: YAML-Konfiguration
+- **Interface-Based Design**: Generische Verteilungsarchitektur
 
 ## 🛣️ Roadmap
 
@@ -183,7 +279,20 @@ Der Analyser erstellt folgende Ausgaben im `./output` Verzeichnis:
 - Heatmaps für Standortvergleiche
 - Interaktive HTML-Dashboards
 
-### 📋 Phase 4: Windenergie-Berechnungen (Geplant)
+### ✅ Phase 4: Architektur-Refactoring (Abgeschlossen)
+- Interface-basierte Verteilungsarchitektur (`ContinuousDistribution`, `Fitter`)
+- Generische Datenbereinigung und Statistik-Funktionen
+- Automatische Modellauswahl (`SelectBestModel`)
+- Generische Visualisierungskomponenten
+- Unterstützung mehrerer Verteilungen (Weibull, Gamma, Log-Normal)
+
+### 📋 Phase 5: Erweiterte Verteilungen (Geplant)
+- Rayleigh-Verteilung (Sonderfall von Weibull)
+- Normalverteilung (als Referenz)
+- Log-Logistic-Verteilung
+- Generalized Extreme Value (GEV) für Extremwertanalyse
+
+### 📋 Phase 6: Windenergie-Berechnungen (Geplant)
 - Windenergie-Potenzialberechnung
 - Capacity Factor Analyse
 - Power Curve Integration
@@ -192,7 +301,8 @@ Der Analyser erstellt folgende Ausgaben im `./output` Verzeichnis:
 
 - **API-Abhängigkeit**: Abhängig von Open-Meteo API Verfügbarkeit und Limits
 - **Datenqualität**: Abhängig von Wetterdaten und Modellqualität
-- **Modell-Simplifikationen**: Realer Wind ist komplexer als reine Weibull-Verteilung
+- **Modell-Simplifikationen**: Realer Wind ist komplexer als statistische Verteilungen
+- **Automatische Modellauswahl**: Basiert auf AIC, aber keine Garantie für das "wahre" Modell
 - **Kein professionelles Tool**: Nicht für Investitionsentscheidungen geeignet
 
 ## 📄 Lizenz

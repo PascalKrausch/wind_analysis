@@ -3,19 +3,96 @@ package distribution
 import (
 	"errors"
 	"math"
-	"sort"
 
-	"gonum.org/v1/gonum/floats"
 	"gonum.org/v1/gonum/stat"
 )
 
-// WeibullParams repräsentiert die Parameter der Weibull-Verteilung.
+// Weibull repräsentiert eine Weibull-Verteilung mit Shape-, Scale- und Location-Parametern.
+type Weibull struct {
+	Shape    float64 // Formparameter (k)
+	Scale    float64 // Skalenparameter (λ)
+	Location float64 // Lageparameter (μ)
+}
+
+func (w Weibull) Params() []float64 {
+	return []float64{w.Shape, w.Scale, w.Location}
+}
+
+func (w Weibull) Valid() bool {
+	return IsFinite(w.Shape) && IsFinite(w.Scale) && IsFinite(w.Location) && w.Shape > 0 && w.Scale > 0
+}
+
+func (w Weibull) PDF(x float64) float64 {
+	if !w.Valid() {
+		return 0
+	}
+	z := (x - w.Location) / w.Scale
+	if z < 0 {
+		return 0
+	}
+	if z == 0 {
+		switch {
+		case w.Shape < 1:
+			return math.Inf(1)
+		case w.Shape == 1:
+			return w.Shape / w.Scale
+		default:
+			return 0
+		}
+	}
+
+	return (w.Shape / w.Scale) *
+		math.Pow(z, w.Shape-1) *
+		math.Exp(-math.Pow(z, w.Shape))
+}
+
+func (w Weibull) CDF(x float64) float64 {
+	if !w.Valid() {
+		return 0
+	}
+	z := (x - w.Location) / w.Scale
+	if z < 0 {
+		return 0
+	}
+	return 1 - math.Exp(-math.Pow(z, w.Shape))
+}
+
+func (w Weibull) LogPDF(x float64) float64 {
+	if !w.Valid() {
+		return math.Inf(-1)
+	}
+	z := (x - w.Location) / w.Scale
+	if z < 0 {
+		return math.Inf(-1)
+	}
+	if z == 0 {
+		switch {
+		case w.Shape < 1:
+			return math.Inf(1)
+		case w.Shape == 1:
+			return math.Log(w.Shape / w.Scale)
+		default:
+			return math.Inf(-1)
+		}
+	}
+
+	return math.Log(w.Shape/w.Scale) +
+		(w.Shape-1)*math.Log(z) -
+		math.Pow(z, w.Shape)
+}
+
+// WeibullParams repräsentiert die Parameter der Weibull-Verteilung (legacy, für Kompatibilität).
 type WeibullParams struct {
 	Shape    float64 // Formparameter (k)
 	Scale    float64 // Skalenparameter (λ)
 	Location float64 // Lageparameter (μ)
 }
 
+func (p WeibullParams) Valid() bool {
+	return IsFinite(p.Shape) && IsFinite(p.Scale) && IsFinite(p.Location) && p.Shape > 0 && p.Scale > 0
+}
+
+// Legacy Typen für Kompatibilität mit existierendem Code
 type WeibullFitMetrics struct {
 	LogLikelihood float64
 	AIC           float64
@@ -50,92 +127,68 @@ type WeibullComparisonResult struct {
 	MeanAbsCDFDiff  float64
 }
 
-func (p WeibullParams) Valid() bool {
-	return isFinite(p.Shape) && isFinite(p.Scale) && isFinite(p.Location) && p.Shape > 0 && p.Scale > 0
-}
-
-// WeibullPDF berechnet die Wahrscheinlichkeitsdichtefunktion (PDF).
+// WeibullPDF berechnet die Wahrscheinlichkeitsdichtefunktion (PDF) - legacy Funktion.
 func WeibullPDF(x float64, params WeibullParams) float64 {
-	if !params.Valid() {
-		return 0
-	}
-	z := (x - params.Location) / params.Scale
-	if z < 0 {
-		return 0
-	}
-	if z == 0 {
-		switch {
-		case params.Shape < 1:
-			return math.Inf(1)
-		case params.Shape == 1:
-			return params.Shape / params.Scale
-		default:
-			return 0
-		}
-	}
-
-	return (params.Shape / params.Scale) *
-		math.Pow(z, params.Shape-1) *
-		math.Exp(-math.Pow(z, params.Shape))
+	w := Weibull{Shape: params.Shape, Scale: params.Scale, Location: params.Location}
+	return w.PDF(x)
 }
 
-// WeibullCDF berechnet die kumulative Verteilungsfunktion (CDF).
+// WeibullCDF berechnet die kumulative Verteilungsfunktion (CDF) - legacy Funktion.
 func WeibullCDF(x float64, params WeibullParams) float64 {
-	if !params.Valid() {
-		return 0
-	}
-	z := (x - params.Location) / params.Scale
-	if z < 0 {
-		return 0
-	}
-	return 1 - math.Exp(-math.Pow(z, params.Shape))
+	w := Weibull{Shape: params.Shape, Scale: params.Scale, Location: params.Location}
+	return w.CDF(x)
 }
 
 func WeibullLogPDF(x float64, params WeibullParams) float64 {
-	if !params.Valid() {
-		return math.Inf(-1)
-	}
-	z := (x - params.Location) / params.Scale
-	if z < 0 {
-		return math.Inf(-1)
-	}
-	if z == 0 {
-		switch {
-		case params.Shape < 1:
-			return math.Inf(1)
-		case params.Shape == 1:
-			return math.Log(params.Shape / params.Scale)
-		default:
-			return math.Inf(-1)
-		}
-	}
+	w := Weibull{Shape: params.Shape, Scale: params.Scale, Location: params.Location}
+	return w.LogPDF(x)
+}
 
-	return math.Log(params.Shape/params.Scale) +
-		(params.Shape-1)*math.Log(z) -
-		math.Pow(z, params.Shape)
+// WeibullFitter schätzt Shape, Scale und Location per
+// lokationsgestützter Maximum-Likelihood-Näherung.
+type WeibullFitter struct{}
+
+func (f WeibullFitter) Name() string {
+	return "Weibull"
+}
+
+func (f WeibullFitter) Fit(data []float64) (ContinuousDistribution, error) {
+	params, err := estimateWeibullParameters(data)
+	if err != nil {
+		return nil, err
+	}
+	return Weibull{
+		Shape:    params.Shape,
+		Scale:    params.Scale,
+		Location: params.Location,
+	}, nil
 }
 
 // EstimateWeibullParameters schätzt Shape, Scale und Location per
-// lokationsgestützter Maximum-Likelihood-Näherung.
+// lokationsgestützter Maximum-Likelihood-Näherung (legacy).
 func EstimateWeibullParameters(data []float64) (WeibullParams, error) {
-	cleaned := cleanWindSpeedData(data)
+	return estimateWeibullParameters(data)
+}
+
+func estimateWeibullParameters(data []float64) (WeibullParams, error) {
+	cleaned := CleanData(data)
 	if len(cleaned) < 3 {
 		return WeibullParams{}, errors.New("zu wenige gültige Datenpunkte")
 	}
 
-	summary := summarize(cleaned)
-	if summary.min == summary.max {
-		loc := summary.min - 1e-6
+	summary := Summarize(cleaned)
+	if summary.Min == summary.Max {
+		loc := summary.Min - 1e-6
 		return WeibullParams{
 			Shape:    1,
-			Scale:    math.Max(summary.min-loc, 1e-6),
+			Scale:    math.Max(summary.Min-loc, 1e-6),
 			Location: loc,
 		}, nil
 	}
 
-	searchWidth := math.Max(3*summary.stdDev, math.Max(0.1*(summary.max-summary.min), 1.0))
-	searchLower := math.Min(0, summary.min-searchWidth)
-	searchUpper := summary.min - 1e-9
+	searchWidth := math.Max(3*summary.StdDev, math.Max(0.1*(summary.Max-summary.Min), 1.0))
+	searchLower := math.Min(0, summary.Min-searchWidth)
+	searchUpper := summary.Min - 1e-9
 	if searchLower >= searchUpper {
 		searchLower = searchUpper - math.Max(searchWidth, 1.0)
 	}
@@ -169,7 +222,7 @@ func AnalyzeWeibullSeries(seriesName string, heightM int, data []float64) (Weibu
 	}
 
 	metrics := ValidateWeibullFit(data, params)
-	cleaned := cleanWindSpeedData(data)
+	cleaned := CleanData(data)
 
 	return WeibullAnalysisResult{
 		SeriesName:    seriesName,
@@ -187,13 +240,14 @@ func AnalyzeWeibullSeries(seriesName string, heightM int, data []float64) (Weibu
 }
 
 func ValidateWeibullFit(data []float64, params WeibullParams) WeibullFitMetrics {
-	cleaned := cleanWindSpeedData(data)
+	w := Weibull{Shape: params.Shape, Scale: params.Scale, Location: params.Location}
+	cleaned := CleanData(data)
 	n := len(cleaned)
-	if n == 0 || !params.Valid() {
+	if n == 0 || !w.Valid() {
 		return WeibullFitMetrics{}
 	}
 
-	sorted := sortedCopy(cleaned)
+	sorted := SortedCopy(cleaned)
 	ll := WeibullLogLikelihood(cleaned, params)
 
 	aic := 2*3.0 - 2*ll
@@ -202,7 +256,7 @@ func ValidateWeibullFit(data []float64, params WeibullParams) WeibullFitMetrics 
 	ks := 0.0
 	mse := 0.0
 	for i, x := range sorted {
-		model := WeibullCDF(x, params)
+		model := w.CDF(x)
 		upper := float64(i+1) / float64(n)
 		lower := float64(i) / float64(n)
 
@@ -228,19 +282,19 @@ func CompareWeibullSeries(left, right WeibullAnalysisResult) WeibullComparisonRe
 	grid := 128
 	minX := math.Min(left.Location, right.Location)
 	maxX := math.Max(left.Location+8*left.Scale, right.Location+8*right.Scale)
-	if !isFinite(minX) || !isFinite(maxX) || maxX <= minX {
+	if !IsFinite(minX) || !IsFinite(maxX) || maxX <= minX {
 		maxX = minX + 1
 	}
 
 	maxDiff := 0.0
 	meanAbsDiff := 0.0
 
-	leftParams := WeibullParams{Shape: left.Shape, Scale: left.Scale, Location: left.Location}
-	rightParams := WeibullParams{Shape: right.Shape, Scale: right.Scale, Location: right.Location}
+	leftDist := Weibull{Shape: left.Shape, Scale: left.Scale, Location: left.Location}
+	rightDist := Weibull{Shape: right.Shape, Scale: right.Scale, Location: right.Location}
 
 	for i := 0; i < grid; i++ {
 		x := minX + (float64(i)/float64(grid-1))*(maxX-minX)
-		diff := math.Abs(WeibullCDF(x, leftParams) - WeibullCDF(x, rightParams))
+		diff := math.Abs(leftDist.CDF(x) - rightDist.CDF(x))
 		if diff > maxDiff {
 			maxDiff = diff
 		}
@@ -261,12 +315,13 @@ func CompareWeibullSeries(left, right WeibullAnalysisResult) WeibullComparisonRe
 }
 
 func WeibullLogLikelihood(data []float64, params WeibullParams) float64 {
-	if !params.Valid() {
+	w := Weibull{Shape: params.Shape, Scale: params.Scale, Location: params.Location}
+	if !w.Valid() {
 		return math.Inf(-1)
 	}
 	ll := 0.0
 	for _, x := range data {
-		v := WeibullLogPDF(x, params)
+		v := w.LogPDF(x)
 		if math.IsInf(v, -1) {
 			return math.Inf(-1)
 		}
@@ -275,86 +330,49 @@ func WeibullLogLikelihood(data []float64, params WeibullParams) float64 {
 	return ll
 }
 
-type sampleSummary struct {
-	mean   float64
-	stdDev float64
-	min    float64
-	max    float64
-}
-
-func cleanWindSpeedData(data []float64) []float64 {
-	out := make([]float64, 0, len(data))
-	for _, v := range data {
-		if math.IsNaN(v) || math.IsInf(v, 0) || v < 0 {
-			continue
-		}
-		out = append(out, v)
-	}
-	return out
-}
-
-func summarize(data []float64) sampleSummary {
-	n := len(data)
-	if n == 0 {
-		return sampleSummary{}
-	}
-
-	summary := sampleSummary{
-		mean: stat.Mean(data, nil),
-		min:  floats.Min(data),
-		max:  floats.Max(data),
-	}
-	if n > 1 {
-		variance := stat.Variance(data, nil)
-		if variance > 0 {
-			summary.stdDev = math.Sqrt(variance)
-		}
-	}
-	return summary
-}
-
-func sortedCopy(data []float64) []float64 {
-	out := make([]float64, len(data))
-	copy(out, data)
-	sort.Float64s(out)
-	return out
-}
-
 func fitWeibullAtLocation(data []float64, location float64) (WeibullParams, float64, bool) {
 	shifted := make([]float64, len(data))
 	logs := make([]float64, len(data))
 
 	for i, x := range data {
 		y := x - location
-		if y <= 0 || !isFinite(y) {
+		if y <= 0 || !IsFinite(y) {
 			return WeibullParams{}, math.Inf(-1), false
 		}
 		shifted[i] = y
 		logs[i] = math.Log(y)
 	}
 
-	summary := summarize(shifted)
-	if summary.mean <= 0 || !isFinite(summary.mean) {
+	summary := Summarize(shifted)
+	if summary.Mean <= 0 || !IsFinite(summary.Mean) {
 		return WeibullParams{}, math.Inf(-1), false
 	}
 
-	shape := math.Pow(summary.stdDev/summary.mean, -1.086)
-	if !isFinite(shape) || shape <= 0 {
+	shape := math.Pow(summary.StdDev/summary.Mean, -1.086)
+	if !IsFinite(shape) || shape <= 0 {
 		shape = 1.5
 	}
 	shape = refineWeibullShape(logs, shape)
-	if !isFinite(shape) || shape <= 0 {
+	if !IsFinite(shape) || shape <= 0 {
 		return WeibullParams{}, math.Inf(-1), false
 	}
 
 	scale := weibullScaleFromLogs(logs, shape)
-	if !isFinite(scale) || scale <= 0 {
+	if !IsFinite(scale) || scale <= 0 {
 		return WeibullParams{}, math.Inf(-1), false
 	}
 
 	params := WeibullParams{Shape: shape, Scale: scale, Location: location}
-	ll := WeibullLogLikelihood(data, params)
-	if !isFinite(ll) {
+	w := Weibull{Shape: shape, Scale: scale, Location: location}
+	ll := 0.0
+	for _, x := range data {
+		v := w.LogPDF(x)
+		if math.IsInf(v, -1) {
+			return WeibullParams{}, math.Inf(-1), false
+		}
+		ll += v
+	}
+	if !IsFinite(ll) {
 		return WeibullParams{}, math.Inf(-1), false
 	}
 
@@ -363,7 +381,7 @@ func fitWeibullAtLocation(data []float64, location float64) (WeibullParams, floa
 
 func refineWeibullShape(logs []float64, initial float64) float64 {
 	k := initial
-	if !isFinite(k) || k <= 0 {
+	if !IsFinite(k) || k <= 0 {
 		k = 1.5
 	}
 
@@ -377,17 +395,17 @@ func refineWeibullShape(logs []float64, initial float64) float64 {
 			sumPowLog += pow * logY
 		}
 
-		if sumPow <= 0 || !isFinite(sumPow) {
+		if sumPow <= 0 || !IsFinite(sumPow) {
 			break
 		}
 
 		denom := sumPowLog/sumPow - meanLog
-		if denom <= 0 || !isFinite(denom) {
+		if denom <= 0 || !IsFinite(denom) {
 			break
 		}
 
 		next := 1.0 / denom
-		if !isFinite(next) || next <= 0 {
+		if !IsFinite(next) || next <= 0 {
 			break
 		}
 
@@ -407,8 +425,4 @@ func weibullScaleFromLogs(logs []float64, shape float64) float64 {
 		sumPow += math.Exp(shape * logY)
 	}
 	return math.Pow(sumPow/float64(len(logs)), 1.0/shape)
-}
-
-func isFinite(v float64) bool {
-	return !math.IsNaN(v) && !math.IsInf(v, 0)
 }
