@@ -80,6 +80,8 @@ func SelectBestModel(data []float64) (ContinuousDistribution, FitMetrics, error)
 		WeibullFitter{},
 		LogNormalFitter{},
 		GammaFitter{},
+		NormalFitter{},
+		BetaFitter{},
 	}
 
 	var bestDist ContinuousDistribution
