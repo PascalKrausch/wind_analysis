@@ -2,10 +2,14 @@ package visualization
 
 import (
 	"fmt"
+	"math"
+	"sort"
 	"time"
 
 	"gonum.org/v1/gonum/floats"
 	"gonum.org/v1/gonum/stat"
+
+	"wind_analysis/internal/analysis/statistics"
 )
 
 // TimeSeriesConverter konvertiert Zeitreihen für Chart-Darstellung
@@ -275,4 +279,118 @@ func CreateColorScale(value, min, max float64) string {
 		b := 155 - int((normalized-0.5)*2*155)
 		return fmt.Sprintf("rgb(%d, %d, %d)", r, g, b)
 	}
+}
+
+// --- Generische Hilfsfunktionen zur Ausrichtung/Aufbereitung von Kurven-/Punkt-Serien für Charts ---
+
+// normalizeSeries ersetzt NaN/Inf-Werte durch 0, damit Charts keine ungültigen Werte rendern.
+func normalizeSeries(v float64) float64 {
+	if math.IsNaN(v) || math.IsInf(v, 0) {
+		return 0
+	}
+	return v
+}
+
+// uniqueStrings entfernt aufeinanderfolgende Duplikate aus einer sortierten String-Liste.
+func uniqueStrings(in []string) []string {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(in))
+	last := ""
+	for i, s := range in {
+		if i == 0 || s != last {
+			out = append(out, s)
+			last = s
+		}
+	}
+	return out
+}
+
+// mergeSortedXAxis vereinigt zwei X-Achsen-Beschriftungslisten zu einer sortierten, deduplizierten Liste.
+func mergeSortedXAxis(a, b []string) []string {
+	out := make([]string, 0, len(a)+len(b))
+	out = append(out, a...)
+	out = append(out, b...)
+	sort.Strings(out)
+	return uniqueStrings(out)
+}
+
+// alignSeries richtet eine Serie (seriesX/seriesY) an einer gemeinsamen X-Achse aus; fehlende Werte werden NaN.
+func alignSeries(xAxis, seriesX []string, seriesY []float64) []float64 {
+	m := make(map[string]float64, len(seriesX))
+	for i := range seriesX {
+		m[seriesX[i]] = seriesY[i]
+	}
+
+	out := make([]float64, len(xAxis))
+	for i, x := range xAxis {
+		if v, ok := m[x]; ok {
+			out[i] = v
+			continue
+		}
+		out[i] = math.NaN()
+	}
+	return out
+}
+
+// cdfSeries wandelt CDF-Punkte in X-Achsen-Beschriftungen und Y-Werte um.
+func cdfSeries(points []statistics.CDFPoint) ([]string, []float64) {
+	x := make([]string, 0, len(points))
+	y := make([]float64, 0, len(points))
+	for _, p := range points {
+		x = append(x, fmt.Sprintf("%.4f", p.X))
+		y = append(y, p.Y)
+	}
+	return x, y
+}
+
+// histogramXAxisAndCenters erzeugt Achsenbeschriftungen und Bin-Mittelpunkte für ein Histogramm.
+func histogramXAxisAndCenters(hist []statistics.Bin) ([]string, []float64) {
+	x := make([]string, 0, len(hist))
+	centers := make([]float64, 0, len(hist))
+	for _, b := range hist {
+		x = append(x, fmt.Sprintf("%.2f-%.2f", b.Min, b.Max))
+		centers = append(centers, (b.Min+b.Max)/2.0)
+	}
+	return x, centers
+}
+
+// densityAtXVals interpoliert Dichtewerte (PDF-Kurve) linear an den angegebenen X-Stellen.
+func densityAtXVals(points []statistics.DensityPoint, xVals []float64) []float64 {
+	out := make([]float64, len(xVals))
+	if len(points) == 0 {
+		return out
+	}
+
+	sorted := append([]statistics.DensityPoint(nil), points...)
+	sort.Slice(sorted, func(i, j int) bool { return sorted[i].X < sorted[j].X })
+
+	for i, x := range xVals {
+		if x <= sorted[0].X {
+			out[i] = normalizeSeries(sorted[0].Y)
+			continue
+		}
+		last := len(sorted) - 1
+		if x >= sorted[last].X {
+			out[i] = normalizeSeries(sorted[last].Y)
+			continue
+		}
+
+		for j := 1; j < len(sorted); j++ {
+			left, right := sorted[j-1], sorted[j]
+			if x >= left.X && x <= right.X {
+				dx := right.X - left.X
+				if dx == 0 {
+					out[i] = normalizeSeries(left.Y)
+					break
+				}
+				t := (x - left.X) / dx
+				out[i] = normalizeSeries(left.Y + t*(right.Y-left.Y))
+				break
+			}
+		}
+	}
+
+	return out
 }

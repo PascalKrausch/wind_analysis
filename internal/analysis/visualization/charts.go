@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/go-echarts/go-echarts/v2/charts"
+	"github.com/go-echarts/go-echarts/v2/components"
 	"github.com/go-echarts/go-echarts/v2/opts"
 )
 
@@ -344,6 +345,17 @@ body > div:first-child {
 	}
 
 	return RenderHTMLToFile(htmlContent, filename)
+}
+
+// SavePage rendert eine go-echarts Page (Dashboard mit mehreren Charts) in eine Datei.
+func SavePage(page *components.Page, outputPath string) error {
+	f, err := os.Create(outputPath)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+
+	return page.Render(f)
 }
 
 // RenderHTMLToFile rendert beliebiges HTML in eine Datei (z. B. Tabellen-Übersichten).
