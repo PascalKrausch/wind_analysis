@@ -2,6 +2,7 @@ package statistics
 
 import (
 	"math"
+	"sort"
 
 	"gonum.org/v1/gonum/stat"
 )
@@ -35,11 +36,42 @@ func CalcSpearman(xData, yData []float64) float64 {
 		return 0
 	}
 
-	r := stat.Spearman(xData, yData, nil)
+	// Spearman correlation is Pearson correlation on ranks
+	rankX := rankData(xData)
+	rankY := rankData(yData)
+	
+	r := stat.Correlation(rankX, rankY, nil)
 	if math.IsNaN(r) {
 		return 0
 	}
 	return r
+}
+
+// rankData converts data to ranks
+func rankData(data []float64) []float64 {
+	n := len(data)
+	if n == 0 {
+		return nil
+	}
+
+	// Create index array
+	indices := make([]int, n)
+	for i := range indices {
+		indices[i] = i
+	}
+
+	// Sort indices based on data values
+	sort.Slice(indices, func(i, j int) bool {
+		return data[indices[i]] < data[indices[j]]
+	})
+
+	// Assign ranks
+	ranks := make([]float64, n)
+	for i, idx := range indices {
+		ranks[idx] = float64(i + 1)
+	}
+
+	return ranks
 }
 
 // =========================================================================

@@ -12,17 +12,34 @@ Statistische Analyse von Windgeschwindigkeitsdaten mittels Weibull-Verteilung, P
 wind-analysis/
 ├── cmd/
 │   ├── fetcher/         # Einfacher Fetcher für einzelne Standorte
-│   └── analyser/        # Statistische Analysen (in Entwicklung)
+│   └── analyser/        # Statistische Analysen & Visualisierungen
 ├── internal/
 │   ├── client/          # Open-Meteo API Client mit Rate-Limiting
 │   ├── database/        # PostgreSQL/TimescaleDB Integration
+│   ├── utils/           # Utility-Funktionen (Filename-Sanitization, etc.)
 │   └── analysis/
-│       └── interpolation/  # Power-Law Windprofil-Interpolation
+│       ├── interpolation/   # Power-Law Windprofil-Interpolation
+│       ├── statistics/      # Deskriptive Statistik, Korrelation, Verteilungen
+│       ├── distribution/    # Weibull-Verteilung & Parameterschätzung
+│       ├── validation/      # Validierungs-Orchestrierung
+│       ├── weibull/         # Weibull-Verarbeitungslogik
+│       └── visualization/   # Chart-Erstellung (go-echarts)
 ├── pipeline/            # Concurrency-Engine für parallele Datenabfrage
 ├── models/              # Datenstrukturen & Konfiguration
 ├── config.yaml          # Standorte & Pipeline-Konfiguration
 └── docker-compose.yml   # Datenbank-Setup
 ```
+
+## 🏛️ Architektur-Prinzipien
+
+Das Projekt folgt etablierten Software-Architektur-Patterns:
+
+- **Layered Architecture**: Klare Trennung zwischen Entry Points, Business Logic und Data Access
+- **Domain-Driven Design**: Packages nach fachlichen Domänen strukturiert
+- **Dependency Injection**: Konstruktoren nehmen Abhängigkeiten als Parameter für Testbarkeit
+- **Context-First Pattern**: Alle asynchronen Funktionen verwenden `context.Context`
+- **Pipeline Pattern**: Fan-Out/Fan-In für parallele Datenverarbeitung
+- **Repository Pattern**: Datenbankzugriffe gekapselt in dedizierten Packages
 
 ## 🚀 Funktionalität
 
@@ -32,16 +49,20 @@ wind-analysis/
 - **Automatische API-Auswahl**: Intelligente Wahl zwischen Forecast, Historical Forecast und Archive API
 - **Concurrency Pipeline**: Parallele Datenabfrage mit konfigurierbaren Worker-Routinen
 - **Rate-Limiting**: Konfigurierbare API-Rate-Limits für stabile Datenabfrage
-- **Power-Law Interpolation**: Windprofil-Interpolation zwischen verschiedenen Höhen
+- **Power-Law Interpolation**: Windprofil-Interpolation zwischen verschiedenen Höhen (Hellmann-Exponenten)
 - **Batch-Verarbeitung**: Effizientes Speichern großer Datensätze via PostgreSQL COPY
 - **Datenbank-Speicherung**: PostgreSQL mit TimescaleDB für effiziente Zeitreihen-Abfragen
+- **Weibull-Parameterschätzung**: Shape (k), Scale (λ) und Location (μ) Parameterschätzung via MLE
+- **Goodness-of-Fit Tests**: KS-Test, AIC, BIC, RMSE für Modellvalidierung
+- **Statistische Analyse**: Deskriptive Statistik, Korrelation (Pearson, Spearman, Kendall), Histogramme
+- **Visualisierung**: Interaktive HTML-Charts (Histogramme, PDF/CDF, Heatmaps, Vergleiche)
+- **Validierung**: Power-Law Modellvalidierung mit Fehleranalyse
 
 ### In Planung
 
-- **Weibull-Parameterschätzung**: Shape (k) und Scale (λ) Parameter via MLE und Method of Moments
-- **Goodness-of-Fit Tests**: KS-Test, Chi-Square für Modellvalidierung
 - **Windenergie-Berechnung**: Theoretische Energieerträge und Capacity Factors
 - **Statistische Vergleiche**: Wasserstein-Distanz für zeitliche Veränderungen
+- **Erweiterte Visualisierungen**: Windrosen, Zeitreihen-Dashboards
 
 ## 📋 Voraussetzungen
 
@@ -68,8 +89,14 @@ docker-compose up -d
 
 ## 🚀 Nutzung
 
+### Datenabfrage (Pipeline)
 
-### Pipeline (Parallele Abfrage mehrerer Standorte)
+Parallele Abfrage mehrerer Standorte für einen Zeitraum:
+
+```bash
+# Pipeline starten (lädt Daten für alle Standorte in config.yaml)
+go run cmd/fetcher/main.go -config config.yaml
+```
 
 Die Pipeline-Konfiguration erfolgt über `config.yaml`:
 
@@ -97,24 +124,44 @@ pipeline:               <- Go-Worker anpassen
 
 Automatische Auswahl basierend auf Zeitraum:
 - **Letzte 3 Monate**: Forecast API mit `past_days` (volles Höhenprofil)
-- **2022-heute**: Historical Forecast API (volles Höhenprofil)  
+- **2022-heute**: Historical Forecast API (volles Höhenprofil)
 - **Vor 2022**: Archive API (10m, 100m + Power Law Interpolation)
+
+### Statistische Analyse & Visualisierung
+
+Analyse der geladenen Winddaten mit statistischen Methoden und Visualisierungen:
+
+```bash
+# Analyser starten (analysiert Daten für alle Standorte in config.yaml)
+go run cmd/analyser/main.go
+```
+
+Der Analyser erstellt folgende Ausgaben im `./output` Verzeichnis:
+
+- **Hellmann-Exponenten**: Timeline-Diagramme der Windprofil-Parameter
+- **Validierungsmetriken**: Tabellen und Charts für Power-Law Modellvalidierung
+- **Weibull-Analyse**: PDF/CDF Charts, Histogramme und Fit-Güte-Metriken
+- **Standortvergleich**: Heatmaps und Vergleichs-Charts zwischen verschiedenen Standorten
 
 ## 🎓 Lernziele
 
 - **Concurrency Patterns**: Fan-Out/Fan-In Pipeline mit Worker-Pools
 - **API-Integration**: Rate-Limiting, Retry-Logik, Fallback-Strategien
 - **Datenbank-Design**: TimescaleDB Hypertables für effiziente Zeitreihen
-- **Numerische Verfahren**: Power-Law Interpolation für Windprofile
+- **Numerische Verfahren**: Power-Law Interpolation für Windprofile, Weibull-Parameterschätzung
 - **Statistische Analyse**: Weibull-Verteilung, Parameterschätzung, Goodness-of-Fit Tests
+- **Visualisierung**: Interaktive Charts mit go-echarts
+- **Software-Architektur**: Layered Architecture, Dependency Injection, Code-Refactoring
 
 ## 🛠️ Tech Stack
 
-- **Go 1.20+**: Hauptprogrammiersprache
+- **Go 1.25+**: Hauptprogrammiersprache
 - **PostgreSQL + TimescaleDB**: Zeitreihen-Datenbank
 - **Open-Meteo API**: Wetterdatenquelle (Archive, Historical Forecast, Forecast)
 - **pgx/v5**: PostgreSQL Treiber
-- **Geplant**: gonum/stat, gonum/dist, gonum/optimize
+- **gonum/stat**: Statistische Funktionen (Korrelation, Quantile, etc.)
+- **go-echarts**: Interaktive Chart-Bibliothek
+- **gopkg.in/yaml.v3**: YAML-Konfiguration
 
 ## 🛣️ Roadmap
 
@@ -124,20 +171,22 @@ Automatische Auswahl basierend auf Zeitraum:
 - PostgreSQL/TimescaleDB Schema
 - Power-Law Interpolation
 
-### 🔄 Phase 2: Statistische Analyse (In Entwicklung)
-- Weibull-Parameterschätzung (MLE, Method of Moments)
-- Goodness-of-Fit Tests (KS-Test, Chi-Square)
-- Wasserstein-Distanz für zeitliche Vergleiche
+### ✅ Phase 2: Statistische Analyse (Abgeschlossen)
+- Weibull-Parameterschätzung (MLE mit Location-Parameter)
+- Goodness-of-Fit Tests (KS-Test, AIC, BIC, RMSE)
+- Deskriptive Statistik & Korrelation (Pearson, Spearman, Kendall)
+- Power-Law Modellvalidierung
 
-### 📋 Phase 3: Windenergie-Berechnungen (Geplant)
+### ✅ Phase 3: Visualisierung (Abgeschlossen)
+- Weibull-PDF/CDF Plots
+- Histogramme & Vergleichs-Charts
+- Heatmaps für Standortvergleiche
+- Interaktive HTML-Dashboards
+
+### 📋 Phase 4: Windenergie-Berechnungen (Geplant)
 - Windenergie-Potenzialberechnung
 - Capacity Factor Analyse
 - Power Curve Integration
-
-### 📋 Phase 4: Visualisierung (Geplant)
-- Weibull-PDF Plots, Q-Q Plots
-- Windrosen
-- Zeitreihen-Visualisierungen
 
 ## ⚠️ Limitierungen & Disclaimer
 

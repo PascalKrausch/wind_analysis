@@ -120,6 +120,11 @@ func CalcHistogram(data []float64, binCount int, stats CoreStats) []Bin {
 		dividers[i] = min + float64(i)*binWidth
 	}
 	dividers[binCount] = max // numerische Stabilität am rechten Rand
+	// Sichere Behandlung von Randfällen
+	epsilon := 1e-10
+	if dividers[binCount] >= max {
+		dividers[binCount] = max + epsilon
+	}
 
 	counts := make([]float64, binCount)
 	stat.Histogram(counts, dividers, data, nil)
@@ -287,16 +292,55 @@ func EstimateWeibullParameters(data []float64, stats CoreStats) WeibullResult {
 		return WeibullResult{}
 	}
 
-	// Justus-Approximation für den Formparameter k:
-	// k = (stdDev / mean)^(-1.086)
 	shape := math.Pow(stats.StdDev/stats.Mean, -1.086)
-
-	// Skalenparameter c berechnen:
-	// c = mean / Gamma(1 + 1/k)
 	scale := stats.Mean / math.Gamma(1.0+(1.0/shape))
 
 	return WeibullResult{
 		Shape: shape,
 		Scale: scale,
 	}
+}
+
+// FilterFinite erstellt eine Kopie ohne NaN/Inf-Werte.
+func FilterFinite(data []float64) []float64 {
+	out := make([]float64, 0, len(data))
+	for _, v := range data {
+		if math.IsNaN(v) || math.IsInf(v, 0) {
+			continue
+		}
+		out = append(out, v)
+	}
+	return out
+}
+
+// SortedCopy erstellt eine sortierte Kopie der Daten.
+func SortedCopy(data []float64) []float64 {
+	out := make([]float64, len(data))
+	copy(out, data)
+	sort.Float64s(out)
+	return out
+}
+
+// CalcPercentileFraction erwartet sortierte Daten und liefert ein lineares Quantil (p zwischen 0 und 1).
+func CalcPercentileFraction(sortedData []float64, p float64) float64 {
+	n := len(sortedData)
+	if n == 0 {
+		return 0
+	}
+	if p <= 0 {
+		return sortedData[0]
+	}
+	if p >= 1 {
+		return sortedData[n-1]
+	}
+
+	pos := p * float64(n-1)
+	lo := int(math.Floor(pos))
+	hi := int(math.Ceil(pos))
+	if lo == hi {
+		return sortedData[lo]
+	}
+
+	weight := pos - float64(lo)
+	return sortedData[lo]*(1-weight) + sortedData[hi]*weight
 }
