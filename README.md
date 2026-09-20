@@ -2,6 +2,18 @@
 
 **⚠️ Hinweis:** Lernprojekt zur praktischen Anwendung von statistischen Methoden und numerischen Verfahren in Go. Nicht für produktive Windenergie-Planung geeignet.
 
+## 📈 Aktuelle Verbesserungen
+
+### ✅ Recent Updates (2026-09-20)
+
+- **Grid-Metadaten-Integration**: Speicherung der tatsächlichen Open-Meteo Grid-Koordinaten und Elevation
+- **Methodische Sauberkeit**: Berücksichtigung von Grid-to-Point discrepancies in meteorologischen Modellen
+- **UPSERT-Optimierung**: Kombination aus CopyFrom-Geschwindigkeit und UPSERT-Sicherheit via Staging-Tabelle
+- **Deduplizierung**: Automatische Batch-interne Deduplizierung mit UNIQUE Constraints
+- **Performance-Steigerung**: Optimierte Pipeline-Parameter (concurrency: 4, batch_size: 1000, rate_limit_rps: 4)
+- **Standort-Erweiterung**: 11 methodisch ausgewählte Standorte (Küste, Mittelgebirge, Alpenvorland, Binnenland)
+- **Windgeschwindigkeitseinheiten**: Sicherstellung von m/s-Format über alle API-Endpunkte
+
 ## 🎯 Projektziel
 
 Statistische Analyse von Windgeschwindigkeitsdaten mittels generischer Verteilungsanalyse, automatischer Modellauswahl und Performance-optimierter Datenverarbeitung.
@@ -132,11 +144,16 @@ Der Übergang von Weibull-spezifischer zu generischer Architektur erfolgte in me
 
 - **Open-Meteo API Integration**: Abruf von Winddaten für verschiedene Höhen (10m, 80m, 100m, 120m, 180m, 200m)
 - **Automatische API-Auswahl**: Intelligente Wahl zwischen Forecast, Historical Forecast und Archive API
+- **Grid-Metadaten-Dokumentation**: Speicherung der tatsächlichen Grid-Koordinaten und Elevation von Open-Meteo
+- **Methodisch saubere Grid-Point-Handling**: Berücksichtigung von Grid-to-Point discrepancies in meteorologischen Modellen
 - **Concurrency Pipeline**: Parallele Datenabfrage mit konfigurierbaren Worker-Routinen
 - **Rate-Limiting**: Konfigurierbare API-Rate-Limits für stabile Datenabfrage
 - **Power-Law Interpolation**: Windprofil-Interpolation zwischen verschiedenen Höhen (Hellmann-Exponenten)
-- **Batch-Verarbeitung**: Effizientes Speichern großer Datensätze via PostgreSQL COPY
+- **Batch-Verarbeitung**: Effizientes Speichern großer Datensätze via PostgreSQL COPY mit Staging-Tabelle
+- **Intelligente UPSERT-Logik**: Kombination aus CopyFrom-Geschwindigkeit und UPSERT-Sicherheit
+- **Deduplizierung**: Automatische Batch-interne Deduplizierung basierend auf time/location_name
 - **Datenbank-Speicherung**: PostgreSQL mit TimescaleDB für effiziente Zeitreihen-Abfragen
+- **UNIQUE Constraints**: Verhinderung von Datensatz-Duplikaten durch Datenbank-Constraints
 - **Generische Verteilungsanalyse**: Interface-basierte Architektur für verschiedene Verteilungen
 - **Unterstützte Verteilungen**: Weibull, Gamma, Log-Normal (erweiterbar)
 - **Automatische Modellauswahl**: `SelectBestModel()` wählt automatisch das beste Modell basierend auf AIC
@@ -177,6 +194,23 @@ docker-compose up -d
 
 # 4. Konfiguration anpassen (config.yaml)
 # Standorte, Zeitraum und Pipeline-Parameter konfigurieren
+
+# 5. Schema initialisieren (beim ersten Start)
+# Das Schema wird automatisch beim ersten Pipeline-Lauf erstellt
+```
+
+### Datenbank-Management
+
+```bash
+# Datenbank neu starten (bei Schema-Änderungen)
+docker-compose down -v
+docker-compose up -d
+
+# Pipeline starten (lädt Daten für alle Standorte)
+go run cmd/fetcher/main.go
+
+# Analyser starten (analysiert geladene Daten)
+go run cmd/analyser/main.go
 ```
 
 ## 🚀 Nutzung
@@ -200,24 +234,91 @@ locationlist:
   - name: Harz
     latitude: 51.7967
     longitude: 10.6206
+  # ... weitere Standorte (aktuell 12 Standorte: Küste, Mittelgebirge, Alpenvorland, Binnenland)
 
 timeframe:              <- Zeitraum anpassen
-  start: "2015-01-01"
-  end: "2026-09-09"
-  chunk_years: 5
+  start: "2022-01-01"  # Empfohlen: 2022+ für volles Höhenprofil
+  end: "2026-09-19"
+  chunk_years: 2
 
 pipeline:               <- Go-Worker anpassen
-  concurrency: 3      # Parallele Worker-Routinen
-  batch_size: 500      # DB Bulk-Insert Schwelle
-  rate_limit_rps: 3    # API Rate Limit
+  concurrency: 4      # Parallele Worker-Routinen
+  batch_size: 1000     # DB Bulk-Insert Schwelle
+  rate_limit_rps: 4    # API Rate Limit
 ```
 
 ### API-Endpoint-Logik
 
 Automatische Auswahl basierend auf Zeitraum:
-- **Letzte 3 Monate**: Forecast API mit `past_days` (volles Höhenprofil)
-- **2022-heute**: Historical Forecast API (volles Höhenprofil)
-- **Vor 2022**: Archive API (10m, 100m + Power Law Interpolation)
+- **Letzte 5 Tage**: Forecast API mit `past_days` (volles Höhenprofil)
+- **2022-heute**: Historical Forecast API (volles Höhenprofil, 9km Auflösung)
+- **Vor 2022**: Archive API (10m, 100m + Power Law Interpolation, ERA5 0.25°/ERA5-Land 0.1°)
+
+### Performance-Schätzung
+
+Basierend auf aktuellen Konfigurationseinstellungen (concurrency: 4, rate_limit_rps: 4, batch_size: 1000):
+
+**Zeitraum 2022-2026 (4.75 Jahre):**
+- **6 Orte** (~250k Datensätze): ~30 Sekunden
+- **12 Orte** (~500k Datensätze): ~55 Sekunden
+- **15 Orte** (~625k Datensätze): ~70 Sekunden
+
+Die optimierte UPSERT-Logik mit Staging-Tabelle macht den Datenbank-Layer zum performancesstarken Teil - der API-Layer ist der Haupt-Bottleneck.
+
+### Standortauswahl & Repräsentativität
+
+Die aktuellen 12 Standorte wurden nach Kriterien der Vielfalt, Relevanz und Repräsentativität ausgewählt:
+
+**Topografische Vielfalt:**
+- **Küsten:** Helgoland (Nordsee), Rostock (Ostsee), Husum (Nordfriesland)
+- **Mittelgebirge:** Harz, Schwäbische Alb, Pforzheim (Nordschwarzwald)
+- **Alpenvorland:** Kempten, Alpenvorland
+- **Tiefland:** Münster, Köln, Mannheim, Ludwigshafen
+
+**Windenergetische Relevanz:**
+- **High-Potential:** Helgoland, Husum, Rostock (maritime Bedingungen)
+- **Medium-Potential:** Harz, Schwäbische Alb (Mittelgebirge)
+- **Reference-Potential:** Köln, Mannheim, Ludwigshafen (Binnenland-Referenz)
+
+**Analytischer Mehrwert:**
+- Windrosen-Vergleiche zwischen verschiedenen Topografien
+- Hellmann-Exponenten-Analysen über verschiedene Geländeformen
+- Weibull-Parameter-Vergleiche für Windpotential-Klassifizierung
+- Saisonalitäts-Analysen (Nord-Süd-Vergleiche)
+
+### Grid-Metadaten & Methodische Sauberkeit
+
+Das Projekt berücksichtigt methodisch kritische Aspekte meteorologischer Modelldaten:
+
+- **Grid-Point Discrepancy**: Open-Meteo liefert Daten auf mathematischen Gittern (ERA5: 0.25° ≈ 25km, ERA5-Land: 0.1° ≈ 11km, ECMWF IFS: 9km)
+- **Elevation-Correction**: Die API führt automatische Elevation-Correction basierend auf umliegenden Grid-Zellen durch
+- **Metadaten-Speicherung**: Alle Datensätze enthalten die tatsächlichen Grid-Koordinaten (`grid_latitude`, `grid_longitude`) und Grid-Elevation (`grid_elevation`)
+- **Analytische Transparenz**: Ermöglicht methodisch saubere Analysen der Unterschiede zwischen angeforderten Koordinaten und tatsächlichen Grid-Punkten
+- **Standard-Verhalten**: Nutzung von Open-Meteo Standard mit automatischer Elevation-Correction für optimale Topografie-Annäherung
+
+### Grid-Metadaten Validierung
+
+Nach dem Datenimport können Sie die Grid-Metadaten analysieren:
+
+```sql
+-- Elevation-Differenzen pro Standort
+SELECT
+    location_name,
+    AVG(grid_elevation) as avg_grid_elevation,
+    MIN(grid_elevation) as min_grid_elevation,
+    MAX(grid_elevation) as max_grid_elevation,
+    COUNT(*) as sample_count
+FROM wind_logs
+GROUP BY location_name;
+
+-- Grid-Koordinaten-Abweichungen
+SELECT
+    location_name,
+    AVG(ABS(grid_latitude - latitude)) as avg_lat_diff,
+    AVG(ABS(grid_longitude - longitude)) as avg_lon_diff
+FROM wind_logs
+GROUP BY location_name;
+```
 
 ### Statistische Analyse & Visualisierung
 
@@ -246,6 +347,8 @@ Der Analyser erstellt folgende Ausgaben im `./output` Verzeichnis:
 - **Strategy Pattern**: Austauschbare Algorithmen und Implementierungen
 - **Software-Architektur**: Layered Architecture, Dependency Injection, Code-Refactoring
 - **Separation of Concerns**: Modularisierung und Entkopplung von Komponenten
+- **Grid-Metadaten-Handling**: Methodisch saubere Berücksichtigung meteorologischer Modell-Gitter
+- **UPSERT-Optimierung**: Kombination aus CopyFrom-Geschwindigkeit und Konsistenz
 
 ## 🛠️ Tech Stack
 
@@ -266,6 +369,9 @@ Der Analyser erstellt folgende Ausgaben im `./output` Verzeichnis:
 - Concurrency Pipeline für parallele Datenabfrage
 - PostgreSQL/TimescaleDB Schema
 - Power-Law Interpolation
+- Grid-Metadaten-Integration (grid_latitude, grid_longitude, grid_elevation)
+- UPSERT-Logik mit Staging-Tabelle und Deduplizierung
+- UNIQUE Constraints für Datensatz-Konsistenz
 
 ### ✅ Phase 2: Statistische Analyse (Abgeschlossen)
 - Weibull-Parameterschätzung (MLE mit Location-Parameter)
@@ -301,6 +407,8 @@ Der Analyser erstellt folgende Ausgaben im `./output` Verzeichnis:
 
 - **API-Abhängigkeit**: Abhängig von Open-Meteo API Verfügbarkeit und Limits
 - **Datenqualität**: Abhängig von Wetterdaten und Modellqualität
+- **Grid-Point Discrepancy**: Meteorologische Modelldaten basieren auf Gittern (9-25km Auflösung), nicht exakten Standortkoordinaten
+- **Elevation-Differenzen**: Grid-Elevation kann von tatsächlicher Standort-Elevation abweichen (besonders in bergigen Regionen)
 - **Modell-Simplifikationen**: Realer Wind ist komplexer als statistische Verteilungen
 - **Automatische Modellauswahl**: Basiert auf AIC, aber keine Garantie für das "wahre" Modell
 - **Kein professionelles Tool**: Nicht für Investitionsentscheidungen geeignet

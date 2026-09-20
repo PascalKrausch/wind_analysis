@@ -6,13 +6,14 @@ import (
 	"log"
 	"os"
 
-	"github.com/joho/godotenv"
 	"wind_analysis/internal/database"
+
+	"github.com/joho/godotenv"
 )
 
 // setupDatabase initialisiert die Datenbankverbindung
 func setupDatabase(ctx context.Context) (*database.DB, error) {
-	// .env Datei laden (optional)
+
 	if err := godotenv.Load(); err != nil {
 		log.Println("keine .env gefunden")
 	}

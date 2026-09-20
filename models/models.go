@@ -3,7 +3,7 @@ package models
 import "time"
 
 // -----------------------------------------------------------------------------
-// 1. API & Core Domain Models (Bestehend)
+// 1. API & Core Domain Models
 // -----------------------------------------------------------------------------
 
 type WindData struct {
@@ -30,16 +30,41 @@ type Location struct {
 }
 
 type WindRecord struct {
-	Time     time.Time `json:"time"`
-	Location Location  `json:"location"`
-	WindData WindData  `json:"wind_data"`
+	Time         time.Time    `json:"time"`
+	Location     Location     `json:"location"`
+	WindData     WindData     `json:"wind_data"`
+	GridMetadata GridMetadata `json:"grid_metadata"`
+}
+
+type GridMetadata struct {
+	GridLatitude  float64 `json:"grid_latitude"`
+	GridLongitude float64 `json:"grid_longitude"`
+	GridElevation float64 `json:"grid_elevation"`
 }
 
 type OpenMeteoResponse struct {
-	Latitude  float64    `json:"latitude"`
-	Longitude float64    `json:"longitude"`
-	Timezone  string     `json:"timezone"`
-	Hourly    HourlyData `json:"hourly"`
+	Latitude    float64     `json:"latitude"`
+	Longitude   float64     `json:"longitude"`
+	Elevation   float64     `json:"elevation"`
+	Timezone    string      `json:"timezone"`
+	HourlyUnits HourlyUnits `json:"hourly_units"`
+	Hourly      HourlyData  `json:"hourly"`
+}
+
+type HourlyUnits struct {
+	Time              string `json:"time"`
+	WindSpeed10m      string `json:"wind_speed_10m"`
+	WindSpeed80m      string `json:"wind_speed_80m"`
+	WindSpeed100m     string `json:"wind_speed_100m"`
+	WindSpeed120m     string `json:"wind_speed_120m"`
+	WindSpeed180m     string `json:"wind_speed_180m"`
+	WindSpeed200m     string `json:"wind_speed_200m"`
+	WindDirection10m  string `json:"wind_direction_10m"`
+	WindDirection80m  string `json:"wind_direction_80m"`
+	WindDirection100m string `json:"wind_direction_100m"`
+	WindDirection120m string `json:"wind_direction_120m"`
+	WindDirection180m string `json:"wind_direction_180m"`
+	WindDirection200m string `json:"wind_direction_200m"`
 }
 
 type HourlyData struct {
@@ -59,7 +84,7 @@ type HourlyData struct {
 }
 
 // -----------------------------------------------------------------------------
-// 2. Pipeline & Worker Architecture Models (Neu)
+// 2. Pipeline & Worker Architecture Models
 // -----------------------------------------------------------------------------
 
 // FetchTask repräsentiert eine atomare Arbeitseinheit für die Worker-Pipeline
@@ -99,7 +124,7 @@ type Config struct {
 }
 
 // -----------------------------------------------------------------------------
-// 3. Weibull-Analysemodelle (Neu)
+// 3. Weibull-Analysemodelle
 // -----------------------------------------------------------------------------
 
 type WindSeriesDescriptor struct {

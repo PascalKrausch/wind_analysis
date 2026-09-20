@@ -3,7 +3,12 @@ package validation
 import (
 	"context"
 	"fmt"
+	"math"
+	"reflect"
 	"sort"
+	"strconv"
+	"strings"
+	"time"
 
 	"wind_analysis/internal/analysis/distribution"
 	"wind_analysis/internal/analysis/fitting"
@@ -81,6 +86,25 @@ func RunSingleLocationAnalysis(ctx context.Context, db *database.DB, config Conf
 
 	fmt.Printf("✅ %d Datensätze geladen\n", len(records))
 
+	// 2a. Windgeschwindigkeit-Timeline (optional)
+	if windTS, err := buildWindSpeedTimeSeriesForLocation(config.LocationName, records); err != nil {
+		fmt.Printf("⚠️ Windgeschwindigkeit-Timeline übersprungen (%s): %v\n", config.LocationName, err)
+	} else {
+		windPath := utils.BuildOutputPath(config.OutputDir, fmt.Sprintf("windspeed_timeline_%s.html", utils.SanitizeForFilename(config.LocationName)))
+		if err := visualization.PlotMultiLocationTimeline(
+			[]visualization.LocationTimeSeries{windTS},
+			"Windgeschwindigkeit über Zeit",
+			"Windgeschwindigkeit (m/s)",
+			windPath,
+		); err != nil {
+			if optErr := handleOptionalStep(config, "Windgeschwindigkeit-Timeline fehlgeschlagen", err); optErr != nil {
+				return optErr
+			}
+		} else {
+			fmt.Printf("📈 Windgeschwindigkeit-Timeline gespeichert: %s\n", windPath)
+		}
+	}
+
 	// 2. Hellmann-Exponenten berechnen
 	fmt.Println("🔬 Berechne Hellmann-Exponenten...")
 	exponents := interpolation.CalculateHellmannExponentsForDataset(records)
@@ -124,6 +148,7 @@ func RunLocationComparison(ctx context.Context, db *database.DB, config Config, 
 	var allRecordsFrom2022 []models.WindRecord
 	var allPlotInputs []fitting.AnalysisPlotInput
 	var timeSeriesList []visualization.LocationTimeSeries
+	var windSpeedSeriesList []visualization.LocationTimeSeries
 
 	fitters := config.Fitters
 	if len(fitters) == 0 {
@@ -142,6 +167,12 @@ func RunLocationComparison(ctx context.Context, db *database.DB, config Config, 
 		if len(records) == 0 {
 			fmt.Printf("  ⚠️ Keine Daten für %s gefunden\n", location.Name)
 			continue
+		}
+
+		if windTS, err := buildWindSpeedTimeSeriesForLocation(location.Name, records); err == nil {
+			windSpeedSeriesList = append(windSpeedSeriesList, windTS)
+		} else {
+			fmt.Printf("  ⚠️ Windgeschwindigkeit für %s nicht geplottet: %v\n", location.Name, err)
 		}
 
 		exponents := interpolation.CalculateHellmannExponentsForDataset(records)
@@ -179,6 +210,25 @@ func RunLocationComparison(ctx context.Context, db *database.DB, config Config, 
 		return fmt.Errorf("fehler beim Erstellen des Standortvergleichs: %w", err)
 	}
 	fmt.Printf("📈 Standortvergleich gespeichert: %s\n", comparisonPath)
+
+	// Standortvergleich der Windgeschwindigkeit zeichnen
+	if len(windSpeedSeriesList) >= 2 {
+		windComparisonPath := utils.BuildOutputPath(config.OutputDir, "windspeed_location_comparison.html")
+		if err := visualization.PlotMultiLocationTimeline(
+			windSpeedSeriesList,
+			"Windgeschwindigkeit: Standortvergleich",
+			"Windgeschwindigkeit (m/s)",
+			windComparisonPath,
+		); err != nil {
+			if optErr := handleOptionalStep(config, "Windgeschwindigkeit-Standortvergleich fehlgeschlagen", err); optErr != nil {
+				return optErr
+			}
+		} else {
+			fmt.Printf("💨 Windgeschwindigkeit-Vergleich gespeichert: %s\n", windComparisonPath)
+		}
+	} else {
+		fmt.Println("ℹ️ Windgeschwindigkeit-Vergleich übersprungen (weniger als 2 Standorte mit gültigen Zeitreihen).")
+	}
 
 	// Globale Validierungsmetriken
 	if err := runGlobalValidationMetrics(config, allRecordsFrom2022, allExponents); err != nil {
@@ -315,8 +365,11 @@ func runDistributionAnalysis(config Config, records []models.WindRecord) error {
 // --- Hilfsfunktionen für das Mapping von Analyse-Daten auf Visualisierungs-Daten ---
 
 func mapExponentsToTimeSeries(locName string, exponents []interpolation.HellmannExponentResult) visualization.LocationTimeSeries {
-	pts := make([]visualization.TimeSeriesPoint, 0, len(exponents))
-	for _, exp := range exponents {
+	sorted := append([]interpolation.HellmannExponentResult(nil), exponents...)
+	sort.Slice(sorted, func(i, j int) bool { return sorted[i].Time.Before(sorted[j].Time) })
+
+	pts := make([]visualization.TimeSeriesPoint, 0, len(sorted))
+	for _, exp := range sorted {
 		pts = append(pts, visualization.TimeSeriesPoint{
 			Time:  exp.Time,
 			Value: exp.Alpha,
@@ -373,4 +426,232 @@ func mapFittingToVizInput(p fitting.AnalysisPlotInput) visualization.Distributio
 		FittedPDF:    p.FittedPDF,
 		FittedCDF:    p.FittedCDF,
 	}
+}
+
+func buildWindSpeedTimeSeriesForLocation(locName string, records []models.WindRecord) (visualization.LocationTimeSeries, error) {
+	points := make([]visualization.TimeSeriesPoint, 0, len(records))
+
+	for _, r := range records {
+		t, v, ok := extractRecordTimeAndSpeed(r)
+		if !ok || t.IsZero() || math.IsNaN(v) || math.IsInf(v, 0) {
+			continue
+		}
+		points = append(points, visualization.TimeSeriesPoint{
+			Time:  t,
+			Value: v,
+		})
+	}
+
+	if len(points) == 0 {
+		return visualization.LocationTimeSeries{}, fmt.Errorf("keine Windgeschwindigkeitswerte aus geladenen Datensätzen extrahierbar")
+	}
+
+	sort.Slice(points, func(i, j int) bool { return points[i].Time.Before(points[j].Time) })
+
+	return visualization.LocationTimeSeries{
+		LocationName: locName,
+		Points:       points,
+	}, nil
+}
+
+func extractRecordTimeAndSpeed(record models.WindRecord) (time.Time, float64, bool) {
+	rv := reflect.ValueOf(record)
+	for rv.Kind() == reflect.Ptr {
+		if rv.IsNil() {
+			return time.Time{}, 0, false
+		}
+		rv = rv.Elem()
+	}
+	if rv.Kind() != reflect.Struct {
+		return time.Time{}, 0, false
+	}
+
+	t, okT := extractTimeFromStruct(rv, []string{
+		"Time", "Timestamp", "DateTime", "Datetime", "MeasurementTime", "MeasuredAt",
+	})
+	v, okV := extractFloatFromStruct(rv, []string{
+		"WindSpeed", "WindSpeedMS", "WindSpeedMs", "WS", "Speed", "Velocity", "V",
+	})
+
+	return t, v, okT && okV
+}
+
+func extractTimeFromStruct(rv reflect.Value, names []string) (time.Time, bool) {
+	// 1) bevorzugte Feldnamen (case-insensitive)
+	for _, n := range names {
+		if f, ok := fieldByNameFold(rv, n); ok {
+			if t, ok := valueToTime(f); ok {
+				return t, true
+			}
+		}
+	}
+
+	// 2) Fallback: erstes plausibles Zeitfeld
+	rt := rv.Type()
+	for i := 0; i < rv.NumField(); i++ {
+		sf := rt.Field(i)
+		if sf.PkgPath != "" { // unexported
+			continue
+		}
+		if !looksLikeTimeName(sf.Name) {
+			continue
+		}
+		if t, ok := valueToTime(rv.Field(i)); ok {
+			return t, true
+		}
+	}
+
+	return time.Time{}, false
+}
+
+func extractFloatFromStruct(rv reflect.Value, names []string) (float64, bool) {
+	// 1) bevorzugte Feldnamen (case-insensitive)
+	for _, n := range names {
+		if f, ok := fieldByNameFold(rv, n); ok {
+			if v, ok := valueToFloat(f); ok && isPlausibleWindSpeed(v) {
+				return v, true
+			}
+		}
+	}
+
+	// 2) Fallback: rekursiv plausible Windspeed-Felder sammeln
+	candidates := make([]float64, 0, 8)
+	collectLikelyWindSpeeds(rv, "", 0, &candidates)
+	if len(candidates) == 0 {
+		return 0, false
+	}
+
+	sum := 0.0
+	for _, v := range candidates {
+		sum += v
+	}
+	return sum / float64(len(candidates)), true
+}
+
+func fieldByNameFold(rv reflect.Value, name string) (reflect.Value, bool) {
+	rt := rv.Type()
+	for i := 0; i < rv.NumField(); i++ {
+		sf := rt.Field(i)
+		if sf.PkgPath != "" {
+			continue
+		}
+		if strings.EqualFold(sf.Name, name) {
+			return rv.Field(i), true
+		}
+	}
+	return reflect.Value{}, false
+}
+
+func valueToTime(v reflect.Value) (time.Time, bool) {
+	for v.Kind() == reflect.Ptr {
+		if v.IsNil() {
+			return time.Time{}, false
+		}
+		v = v.Elem()
+	}
+
+	if v.Type() == reflect.TypeOf(time.Time{}) {
+		return v.Interface().(time.Time), true
+	}
+	if v.Kind() == reflect.String {
+		s := strings.TrimSpace(v.String())
+		for _, layout := range []string{
+			time.RFC3339, "2006-01-02 15:04:05", "2006-01-02 15:04", "2006-01-02",
+		} {
+			if t, err := time.Parse(layout, s); err == nil {
+				return t, true
+			}
+		}
+	}
+	return time.Time{}, false
+}
+
+func valueToFloat(v reflect.Value) (float64, bool) {
+	for v.Kind() == reflect.Ptr {
+		if v.IsNil() {
+			return 0, false
+		}
+		v = v.Elem()
+	}
+
+	switch v.Kind() {
+	case reflect.Float32, reflect.Float64:
+		return v.Convert(reflect.TypeOf(float64(0))).Float(), true
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+		return float64(v.Int()), true
+	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
+		return float64(v.Uint()), true
+	case reflect.String:
+		f, err := strconv.ParseFloat(strings.TrimSpace(v.String()), 64)
+		return f, err == nil
+	default:
+		return 0, false
+	}
+}
+
+func collectLikelyWindSpeeds(v reflect.Value, fieldName string, depth int, out *[]float64) {
+	if depth > 4 || !v.IsValid() {
+		return
+	}
+
+	for v.Kind() == reflect.Ptr || v.Kind() == reflect.Interface {
+		if v.IsNil() {
+			return
+		}
+		v = v.Elem()
+	}
+
+	switch v.Kind() {
+	case reflect.Struct:
+		rt := v.Type()
+		for i := 0; i < v.NumField(); i++ {
+			sf := rt.Field(i)
+			if sf.PkgPath != "" {
+				continue
+			}
+			collectLikelyWindSpeeds(v.Field(i), sf.Name, depth+1, out)
+		}
+	case reflect.Map:
+		if !looksLikeWindName(fieldName) {
+			return
+		}
+		it := v.MapRange()
+		for it.Next() {
+			collectLikelyWindSpeeds(it.Value(), fieldName, depth+1, out)
+		}
+	case reflect.Slice, reflect.Array:
+		if !looksLikeWindName(fieldName) {
+			return
+		}
+		for i := 0; i < v.Len(); i++ {
+			collectLikelyWindSpeeds(v.Index(i), fieldName, depth+1, out)
+		}
+	default:
+		if !looksLikeWindName(fieldName) {
+			return
+		}
+		if f, ok := valueToFloat(v); ok && isPlausibleWindSpeed(f) {
+			*out = append(*out, f)
+		}
+	}
+}
+
+func looksLikeTimeName(name string) bool {
+	n := strings.ToLower(name)
+	return strings.Contains(n, "time") || strings.Contains(n, "date") || strings.Contains(n, "stamp")
+}
+
+func looksLikeWindName(name string) bool {
+	n := strings.ToLower(name)
+	if n == "v" || strings.HasPrefix(n, "ws") {
+		return true
+	}
+	if strings.Contains(n, "dir") || strings.Contains(n, "direction") {
+		return false
+	}
+	return strings.Contains(n, "wind") || strings.Contains(n, "speed") || strings.Contains(n, "velo")
+}
+
+func isPlausibleWindSpeed(v float64) bool {
+	return !math.IsNaN(v) && !math.IsInf(v, 0) && v >= 0 && v <= 150
 }

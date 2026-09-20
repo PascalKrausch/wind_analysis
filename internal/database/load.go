@@ -15,12 +15,14 @@ func SafeVal[T ~int | ~int32 | ~int64 | ~float32 | ~float64](p *T) float64 {
 
 func (db *DB) LoadWindData(ctx context.Context, locationName string, startTime, endTime string) ([]models.WindRecord, error) {
 	query := `
-	SELECT time, location_name,
-	       wind_speed_10m, wind_speed_80m, wind_speed_100m, wind_speed_120m, wind_speed_180m, wind_speed_200m,
-	       wind_direction_10m, wind_direction_80m, wind_direction_100m, wind_direction_120m, wind_direction_180m, wind_direction_200m
-	FROM wind_logs
-	WHERE location_name = $1 AND time >= $2 AND time <= $3
-	ORDER BY time;`
+	SELECT w.time, w.location_name,
+	       w.wind_speed_10m, w.wind_speed_80m, w.wind_speed_100m, w.wind_speed_120m, w.wind_speed_180m, w.wind_speed_200m,
+	       w.wind_direction_10m, w.wind_direction_80m, w.wind_direction_100m, w.wind_direction_120m, w.wind_direction_180m, w.wind_direction_200m,
+	       l.grid_latitude, l.grid_longitude, l.grid_elevation
+	FROM wind_logs w
+	JOIN locations l ON w.location_name = l.location_name
+	WHERE w.location_name = $1 AND w.time >= $2 AND w.time <= $3
+	ORDER BY w.time;`
 
 	rows, err := db.Conn.Query(ctx, query, locationName, startTime, endTime)
 	if err != nil {
@@ -34,10 +36,12 @@ func (db *DB) LoadWindData(ctx context.Context, locationName string, startTime, 
 		var record models.WindRecord
 		var windSpeed10m, windSpeed80m, windSpeed100m, windSpeed120m, windSpeed180m, windSpeed200m *float64
 		var windDirection10m, windDirection80m, windDirection100m, windDirection120m, windDirection180m, windDirection200m *float64
+		var gridLatitude, gridLongitude, gridElevation *float64
 
 		err := rows.Scan(&record.Time, &record.Location.Name,
 			&windSpeed10m, &windSpeed80m, &windSpeed100m, &windSpeed120m, &windSpeed180m, &windSpeed200m,
-			&windDirection10m, &windDirection80m, &windDirection100m, &windDirection120m, &windDirection180m, &windDirection200m)
+			&windDirection10m, &windDirection80m, &windDirection100m, &windDirection120m, &windDirection180m, &windDirection200m,
+			&gridLatitude, &gridLongitude, &gridElevation)
 		if err != nil {
 			return nil, fmt.Errorf("fehler beim Scannen der Zeile: %w", err)
 		}
@@ -55,6 +59,14 @@ func (db *DB) LoadWindData(ctx context.Context, locationName string, startTime, 
 		record.WindData.WindDirection_120m = windDirection120m
 		record.WindData.WindDirection_180m = windDirection180m
 		record.WindData.WindDirection_200m = windDirection200m
+
+		if gridLatitude != nil && gridLongitude != nil && gridElevation != nil {
+			record.GridMetadata = models.GridMetadata{
+				GridLatitude:  *gridLatitude,
+				GridLongitude: *gridLongitude,
+				GridElevation: *gridElevation,
+			}
+		}
 
 		records = append(records, record)
 	}

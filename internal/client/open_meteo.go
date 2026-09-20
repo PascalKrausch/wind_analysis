@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"net/url"
 	"time"
@@ -196,6 +197,8 @@ func (c *SmartClient) doHTTPRequest(ctx context.Context, url string) (*models.Op
 		return nil, fmt.Errorf("fehler beim JSON decoding: %w", err)
 	}
 
+	log.Printf("Empfangene Einheit für Wind: %s", response.HourlyUnits.WindSpeed10m)
+
 	return &response, nil
 }
 
@@ -212,6 +215,7 @@ func MergeResponses(responses []*models.OpenMeteoResponse) *models.OpenMeteoResp
 	merged := &models.OpenMeteoResponse{
 		Latitude:  responses[0].Latitude,
 		Longitude: responses[0].Longitude,
+		Elevation: responses[0].Elevation,
 		Timezone:  responses[0].Timezone,
 		Hourly:    responses[0].Hourly,
 	}
@@ -316,6 +320,13 @@ func (c *SmartClient) TransformResponseToRecords(task models.FetchTask, resp *mo
 		Longitude: task.Longitude,
 	}
 
+	// Grid-Metadaten aus der API-Antwort
+	gridMetadata := models.GridMetadata{
+		GridLatitude:  resp.Latitude,
+		GridLongitude: resp.Longitude,
+		GridElevation: resp.Elevation,
+	}
+
 	for i := 0; i < totalHours; i++ {
 		// Parst den ISO-Zeitstempel (z.B. "2020-01-01T00:00")
 		t, err := time.Parse("2006-01-02T15:00", resp.Hourly.Time[i])
@@ -341,6 +352,7 @@ func (c *SmartClient) TransformResponseToRecords(task models.FetchTask, resp *mo
 				WindDirection_180m: getPointerAtIndex(resp.Hourly.WindDirection_180m, i),
 				WindDirection_200m: getPointerAtIndex(resp.Hourly.WindDirection_200m, i),
 			},
+			GridMetadata: gridMetadata,
 		}
 	}
 

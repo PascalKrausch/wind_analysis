@@ -52,6 +52,33 @@ func ConvertTimesToXAxisMonthly(times []time.Time) []string {
 	return converter.ConvertTimesToXAxis(times)
 }
 
+const (
+	AggregationHourly  = "hourly"
+	AggregationDaily   = "daily"
+	AggregationWeekly  = "weekly"
+	AggregationMonthly = "monthly"
+)
+
+// ConvertTimesToXAxisWeekly konvertiert Zeiten in wöchentliche X-Achsen-Strings (Montag der Woche).
+func ConvertTimesToXAxisWeekly(times []time.Time) []string {
+	converter := NewTimeSeriesConverter("2006-01-02")
+	return converter.ConvertTimesToXAxis(times)
+}
+
+// ConvertTimesToXAxisByLevel konvertiert Zeiten abhängig vom Aggregationslevel.
+func ConvertTimesToXAxisByLevel(times []time.Time, level string) []string {
+	switch level {
+	case AggregationMonthly:
+		return ConvertTimesToXAxisMonthly(times)
+	case AggregationWeekly:
+		return ConvertTimesToXAxisWeekly(times)
+	case AggregationDaily:
+		return ConvertTimesToXAxisDaily(times)
+	default:
+		return ConvertTimesToXAxisHourly(times)
+	}
+}
+
 // Float64ToStringSlice konvertiert ein Float64-Slice in ein String-Slice
 func Float64ToStringSlice(data []float64) []string {
 	result := make([]string, len(data))
@@ -104,6 +131,43 @@ func GroupByYear(times []time.Time, values []float64) (map[string][]float64, map
 	}
 
 	return yearlyValues, yearlyTimes
+}
+
+// CalculateDailyAverage berechnet tägliche Durchschnittswerte
+func CalculateDailyAverage(times []time.Time, values []float64) (map[string]float64, map[string]int) {
+	dailyValues, _ := GroupByDay(times, values)
+
+	averages := make(map[string]float64)
+	counts := make(map[string]int)
+
+	for day, vals := range dailyValues {
+		sum := 0.0
+		for _, v := range vals {
+			sum += v
+		}
+		averages[day] = sum / float64(len(vals))
+		counts[day] = len(vals)
+	}
+
+	return averages, counts
+}
+
+// GroupByDay gruppiert Daten nach Tagen
+func GroupByDay(times []time.Time, values []float64) (map[string][]float64, map[string][]time.Time) {
+	if len(times) != len(values) {
+		return nil, nil
+	}
+
+	dailyValues := make(map[string][]float64)
+	dailyTimes := make(map[string][]time.Time)
+
+	for i, t := range times {
+		key := t.Format("2006-01-02")
+		dailyValues[key] = append(dailyValues[key], values[i])
+		dailyTimes[key] = append(dailyTimes[key], t)
+	}
+
+	return dailyValues, dailyTimes
 }
 
 // CalculateMonthlyAverage berechnet monatliche Durchschnittswerte
@@ -393,4 +457,63 @@ func densityAtXVals(points []statistics.DensityPoint, xVals []float64) []float64
 	}
 
 	return out
+}
+
+// AggregateTimeSeries aggregiert Punkte auf das gewünschte Zeitniveau (Mittelwert pro Bucket).
+func AggregateTimeSeries(points []TimeSeriesPoint, level string) []TimeSeriesPoint {
+	if len(points) == 0 {
+		return nil
+	}
+
+	type agg struct {
+		sum   float64
+		count int
+	}
+	buckets := make(map[time.Time]agg)
+
+	for _, p := range points {
+		key := bucketStart(p.Time, level)
+		a := buckets[key]
+		a.sum += p.Value
+		a.count++
+		buckets[key] = a
+	}
+
+	keys := make([]time.Time, 0, len(buckets))
+	for k := range buckets {
+		keys = append(keys, k)
+	}
+	sort.Slice(keys, func(i, j int) bool { return keys[i].Before(keys[j]) })
+
+	out := make([]TimeSeriesPoint, 0, len(keys))
+	for _, k := range keys {
+		a := buckets[k]
+		if a.count == 0 {
+			continue
+		}
+		out = append(out, TimeSeriesPoint{
+			Time:  k,
+			Value: a.sum / float64(a.count),
+		})
+	}
+	return out
+}
+
+func bucketStart(t time.Time, level string) time.Time {
+	switch level {
+	case AggregationMonthly:
+		return time.Date(t.Year(), t.Month(), 1, 0, 0, 0, 0, t.Location())
+	case AggregationWeekly:
+		// ISO-nahe Woche: Montag als Wochenstart
+		wd := int(t.Weekday())
+		if wd == 0 {
+			wd = 7
+		}
+		monday := t.AddDate(0, 0, -(wd - 1))
+		return time.Date(monday.Year(), monday.Month(), monday.Day(), 0, 0, 0, 0, t.Location())
+	case AggregationDaily:
+		return time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, t.Location())
+	default:
+		return t.Truncate(time.Hour)
+	}
 }

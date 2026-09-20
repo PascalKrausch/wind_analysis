@@ -11,7 +11,6 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"wind_analysis/internal/analysis/distribution"
 	"wind_analysis/internal/analysis/validation"
 	"wind_analysis/models"
 )
@@ -45,12 +44,7 @@ func main() {
 		StartTime: "2022-01-01",
 		EndTime:   time.Now().Format("2006-01-02"),
 		OutputDir: outputDir,
-		// Hier können nun generisch die zu testenden Verteilungen definiert werden
-		Fitters: []distribution.Fitter{
-			distribution.WeibullFitter{},
-			distribution.LogNormalFitter{},
-			distribution.GammaFitter{},
-		},
+		Fitters:   validation.DefaultFitters(),
 	}
 
 	fmt.Println("🚀 Starte Standardlauf: Einzel-Analysen & Standortvergleich")

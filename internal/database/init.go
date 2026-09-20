@@ -47,12 +47,28 @@ func (db *DB) InitSchema(ctx context.Context) error {
 		id SERIAL,
 		location_name VARCHAR(100) PRIMARY KEY,
 		latitude DOUBLE PRECISION NOT NULL,
-		longitude DOUBLE PRECISION NOT NULL
+		longitude DOUBLE PRECISION NOT NULL,
+		grid_latitude REAL,
+		grid_longitude REAL,
+		grid_elevation REAL
 	);`
 
 	_, err := db.Conn.Exec(ctx, createLocationTable)
 	if err != nil {
 		return fmt.Errorf("fehler beim Erstellen der locations-Tabelle: %w", err)
+	}
+
+	// Grid-Spalten zur locations-Tabelle hinzufügen, falls sie noch nicht existieren (Migration)
+	alterLocationTable := []string{
+		`ALTER TABLE locations ADD COLUMN IF NOT EXISTS grid_latitude REAL;`,
+		`ALTER TABLE locations ADD COLUMN IF NOT EXISTS grid_longitude REAL;`,
+		`ALTER TABLE locations ADD COLUMN IF NOT EXISTS grid_elevation REAL;`,
+	}
+
+	for _, alter := range alterLocationTable {
+		if _, err := db.Conn.Exec(ctx, alter); err != nil {
+			return fmt.Errorf("fehler beim Hinzufügen von Grid-Spalten zur locations-Tabelle: %w", err)
+		}
 	}
 
 	// 2. TimescaleDB-Zeitreihentabelle mit allen Parametern erstellen
@@ -71,12 +87,28 @@ func (db *DB) InitSchema(ctx context.Context) error {
 		wind_direction_100m REAL,
 		wind_direction_120m REAL,
 		wind_direction_180m REAL,
-		wind_direction_200m REAL
+		wind_direction_200m REAL,
+		UNIQUE (time, location_name)
 	);`
 
 	_, err = db.Conn.Exec(ctx, createWeatherLogsTable)
 	if err != nil {
 		return fmt.Errorf("fehler beim Erstellen der weather_logs-Tabelle: %w", err)
+	}
+
+	// Grid-Spalten aus der wind_logs-Tabelle entfernen, falls sie existieren (Migration)
+	// Wir prüfen zuerst, ob die Spalten existieren
+	dropGridColumns := []string{
+		`ALTER TABLE wind_logs DROP COLUMN IF EXISTS grid_latitude;`,
+		`ALTER TABLE wind_logs DROP COLUMN IF EXISTS grid_longitude;`,
+		`ALTER TABLE wind_logs DROP COLUMN IF EXISTS grid_elevation;`,
+	}
+
+	for _, drop := range dropGridColumns {
+		if _, err := db.Conn.Exec(ctx, drop); err != nil {
+			// Fehler beim Droppen ist nicht kritisch - Spalte existiert vielleicht nicht
+			fmt.Printf("Hinweis: Konnte Spalte nicht entfernen (vielleicht existiert sie nicht): %v\n", err)
+		}
 	}
 
 	// 3. weather_logs in eine TimescaleDB-Hypertable umwandeln (falls noch nicht geschehen)

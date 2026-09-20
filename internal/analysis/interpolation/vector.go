@@ -72,3 +72,31 @@ func VectorToVelocity(u, v float64) (wind_speed, wind_direction float64) {
 
 	return wind_speed, wind_direction
 }
+
+// CalculateEkmanTurn berechnet die Richtungsänderung (Scherung) zwischen zwei Höhenstufen in Grad.
+// Ein positiver Wert bedeutet Rechtsdrehung mit der Höhe (Veering), negativ bedeutet Linksdrehung (Backing).
+func CalculateEkmanTurn(dirLower, dirUpper float64) float64 {
+	diff := dirUpper - dirLower
+	for diff > 180 {
+		diff -= 360
+	}
+	for diff < -180 {
+		diff += 360
+	}
+	return diff
+}
+
+// AverageVectors berechnet den physikalisch korrekten Vektormittelwert
+// aus einer Reihe von u- und v-Komponenten.
+func AverageVectors(uSlice, vSlice []float64) (meanU, meanV float64) {
+	if len(uSlice) == 0 || len(uSlice) != len(vSlice) {
+		return 0, 0
+	}
+	var sumU, sumV float64
+	for i := range uSlice {
+		sumU += uSlice[i]
+		sumV += vSlice[i]
+	}
+	n := float64(len(uSlice))
+	return sumU / n, sumV / n
+}
