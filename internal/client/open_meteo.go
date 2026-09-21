@@ -229,81 +229,57 @@ func MergeResponses(responses []*models.OpenMeteoResponse) *models.OpenMeteoResp
 			continue // Überspringe inkonsistente responses
 		}
 
-		// Füge Zeitstempel hinzu (ohne Duplikate)
-		merged.Hourly.Time = appendUniqueStrings(merged.Hourly.Time, resp.Hourly.Time)
+		// Ermittle, ob der erste Zeitstempel von resp mit dem letzten Zeitstempel von merged
+		// übereinstimmt (Chunk-Grenzen können sich überlappen). Der Skip-Count wird anhand des
+		// Time-Arrays bestimmt und dann konsistent auf ALLE parallelen Value-Slices angewendet,
+		// damit Zeit- und Messwert-Arrays niemals gegeneinander verschoben werden.
+		skip := 0
+		if len(merged.Hourly.Time) > 0 && len(resp.Hourly.Time) > 0 &&
+			resp.Hourly.Time[0] == merged.Hourly.Time[len(merged.Hourly.Time)-1] {
+			skip = 1
+		}
+
+		merged.Hourly.Time = appendUniqueStrings(merged.Hourly.Time, resp.Hourly.Time, skip)
 
 		// Füge Windgeschwindigkeiten hinzu
-		merged.Hourly.WindSpeed_10m = appendUniqueFloats(merged.Hourly.WindSpeed_10m, resp.Hourly.WindSpeed_10m)
-		merged.Hourly.WindSpeed_80m = appendUniqueFloats(merged.Hourly.WindSpeed_80m, resp.Hourly.WindSpeed_80m)
-		merged.Hourly.WindSpeed_100m = appendUniqueFloats(merged.Hourly.WindSpeed_100m, resp.Hourly.WindSpeed_100m)
-		merged.Hourly.WindSpeed_120m = appendUniqueFloats(merged.Hourly.WindSpeed_120m, resp.Hourly.WindSpeed_120m)
-		merged.Hourly.WindSpeed_180m = appendUniqueFloats(merged.Hourly.WindSpeed_180m, resp.Hourly.WindSpeed_180m)
-		merged.Hourly.WindSpeed_200m = appendUniqueFloats(merged.Hourly.WindSpeed_200m, resp.Hourly.WindSpeed_200m)
+		merged.Hourly.WindSpeed_10m = appendFloatPointers(merged.Hourly.WindSpeed_10m, resp.Hourly.WindSpeed_10m, skip)
+		merged.Hourly.WindSpeed_80m = appendFloatPointers(merged.Hourly.WindSpeed_80m, resp.Hourly.WindSpeed_80m, skip)
+		merged.Hourly.WindSpeed_100m = appendFloatPointers(merged.Hourly.WindSpeed_100m, resp.Hourly.WindSpeed_100m, skip)
+		merged.Hourly.WindSpeed_120m = appendFloatPointers(merged.Hourly.WindSpeed_120m, resp.Hourly.WindSpeed_120m, skip)
+		merged.Hourly.WindSpeed_180m = appendFloatPointers(merged.Hourly.WindSpeed_180m, resp.Hourly.WindSpeed_180m, skip)
+		merged.Hourly.WindSpeed_200m = appendFloatPointers(merged.Hourly.WindSpeed_200m, resp.Hourly.WindSpeed_200m, skip)
 
 		// Füge Windrichtungen hinzu
-		merged.Hourly.WindDirection_10m = appendUniqueFloats(merged.Hourly.WindDirection_10m, resp.Hourly.WindDirection_10m)
-		merged.Hourly.WindDirection_80m = appendUniqueFloats(merged.Hourly.WindDirection_80m, resp.Hourly.WindDirection_80m)
-		merged.Hourly.WindDirection_100m = appendUniqueFloats(merged.Hourly.WindDirection_100m, resp.Hourly.WindDirection_100m)
-		merged.Hourly.WindDirection_120m = appendUniqueFloats(merged.Hourly.WindDirection_120m, resp.Hourly.WindDirection_120m)
-		merged.Hourly.WindDirection_180m = appendUniqueFloats(merged.Hourly.WindDirection_180m, resp.Hourly.WindDirection_180m)
-		merged.Hourly.WindDirection_200m = appendUniqueFloats(merged.Hourly.WindDirection_200m, resp.Hourly.WindDirection_200m)
+		merged.Hourly.WindDirection_10m = appendFloatPointers(merged.Hourly.WindDirection_10m, resp.Hourly.WindDirection_10m, skip)
+		merged.Hourly.WindDirection_80m = appendFloatPointers(merged.Hourly.WindDirection_80m, resp.Hourly.WindDirection_80m, skip)
+		merged.Hourly.WindDirection_100m = appendFloatPointers(merged.Hourly.WindDirection_100m, resp.Hourly.WindDirection_100m, skip)
+		merged.Hourly.WindDirection_120m = appendFloatPointers(merged.Hourly.WindDirection_120m, resp.Hourly.WindDirection_120m, skip)
+		merged.Hourly.WindDirection_180m = appendFloatPointers(merged.Hourly.WindDirection_180m, resp.Hourly.WindDirection_180m, skip)
+		merged.Hourly.WindDirection_200m = appendFloatPointers(merged.Hourly.WindDirection_200m, resp.Hourly.WindDirection_200m, skip)
 	}
 
 	return merged
 }
 
-// appendUniqueStrings fügt Strings hinzu, ohne Duplikate zu erstellen
-func appendUniqueStrings(base, new []string) []string {
-	if len(new) == 0 {
-		return base
+// appendUniqueStrings hängt new an base an und überspringt dabei genau `skip` Elemente
+// am Anfang von new (Chunk-Grenzen-Überlappung). Der Skip-Count wird zentral in
+// MergeResponses anhand des Time-Arrays ermittelt, damit alle parallelen Arrays
+// (Zeit, Windgeschwindigkeit, Windrichtung) exakt im Gleichschritt bleiben.
+func appendUniqueStrings(base, new []string, skip int) []string {
+	if skip > len(new) {
+		skip = len(new)
 	}
-
-	// Finde den letzten Zeitstempel in base, um Duplikate zu vermeiden
-	lastBaseTime := ""
-	if len(base) > 0 {
-		lastBaseTime = base[len(base)-1]
-	}
-
-	result := append(base, new...)
-
-	// Entferne Duplikate am Übergangspunkt
-	for i := len(base); i < len(result); i++ {
-		if result[i] == lastBaseTime {
-			// Entferne das Duplikat
-			result = append(result[:i], result[i+1:]...)
-			i-- // Index anpassen
-		}
-	}
-
-	return result
+	return append(base, new[skip:]...)
 }
 
-// appendUniqueFloats fügt Float-Slices hinzu, ohne Duplikate zu erstellen
-func appendUniqueFloats(base, new []float64) []float64 {
-	if len(new) == 0 {
-		return base
+// appendFloatPointers hängt new an base an und überspringt dabei genau `skip` Elemente
+// am Anfang von new. Werte bleiben *float64, damit fehlende Messwerte (nil/JSON-null)
+// nicht mit echten 0.0-Werten verwechselt werden.
+func appendFloatPointers(base, new []*float64, skip int) []*float64 {
+	if skip > len(new) {
+		skip = len(new)
 	}
-
-	// Wenn base leer ist, einfach new zurückgeben
-	if len(base) == 0 {
-		return new
-	}
-
-	// Finde den letzten Wert in base, um Duplikate zu vermeiden
-	lastBaseValue := base[len(base)-1]
-
-	result := append(base, new...)
-
-	// Entferne Duplikate am Übergangspunkt
-	for i := len(base); i < len(result); i++ {
-		if result[i] == lastBaseValue {
-			// Entferne das Duplikat
-			result = append(result[:i], result[i+1:]...)
-			i-- // Index anpassen
-		}
-	}
-
-	return result
+	return append(base, new[skip:]...)
 }
 
 // transformResponseToRecords mappt die parallelen JSON-Arrays der API auf flache Zeilenstrukturen.
@@ -359,11 +335,12 @@ func (c *SmartClient) TransformResponseToRecords(task models.FetchTask, resp *mo
 	return records, nil
 }
 
-// getPointerAtIndex prüft Out-Of-Bounds und gibt einen Zeiger auf den Wert zurück (bzw. nil für DB-NULL).
-func getPointerAtIndex(slice []float64, index int) *float64 {
+// getPointerAtIndex prüft Out-Of-Bounds und gibt den Zeiger an der gegebenen Position zurück.
+// Ein nil-Eintrag (JSON-null der API, d.h. fehlender Messwert) bleibt dabei nil und wird
+// so korrekt als DB-NULL gespeichert statt als 0.0.
+func getPointerAtIndex(slice []*float64, index int) *float64 {
 	if index < 0 || index >= len(slice) {
 		return nil
 	}
-	val := slice[index]
-	return &val
+	return slice[index]
 }

@@ -67,20 +67,22 @@ type HourlyUnits struct {
 	WindDirection200m string `json:"wind_direction_200m"`
 }
 
+// HourlyData verwendet *float64, damit ein JSON-"null" der API (fehlender Messwert)
+// als nil erhalten bleibt, statt beim Unmarshal stillschweigend zu 0.0 zu werden.
 type HourlyData struct {
-	Time               []string  `json:"time"`
-	WindSpeed_10m      []float64 `json:"wind_speed_10m"`
-	WindSpeed_80m      []float64 `json:"wind_speed_80m"`
-	WindSpeed_100m     []float64 `json:"wind_speed_100m,omitempty"`
-	WindSpeed_120m     []float64 `json:"wind_speed_120m"`
-	WindSpeed_180m     []float64 `json:"wind_speed_180m"`
-	WindSpeed_200m     []float64 `json:"wind_speed_200m,omitempty"`
-	WindDirection_10m  []float64 `json:"wind_direction_10m"`
-	WindDirection_80m  []float64 `json:"wind_direction_80m"`
-	WindDirection_100m []float64 `json:"wind_direction_100m,omitempty"`
-	WindDirection_120m []float64 `json:"wind_direction_120m"`
-	WindDirection_180m []float64 `json:"wind_direction_180m"`
-	WindDirection_200m []float64 `json:"wind_direction_200m,omitempty"`
+	Time               []string   `json:"time"`
+	WindSpeed_10m      []*float64 `json:"wind_speed_10m"`
+	WindSpeed_80m      []*float64 `json:"wind_speed_80m"`
+	WindSpeed_100m     []*float64 `json:"wind_speed_100m,omitempty"`
+	WindSpeed_120m     []*float64 `json:"wind_speed_120m"`
+	WindSpeed_180m     []*float64 `json:"wind_speed_180m"`
+	WindSpeed_200m     []*float64 `json:"wind_speed_200m,omitempty"`
+	WindDirection_10m  []*float64 `json:"wind_direction_10m"`
+	WindDirection_80m  []*float64 `json:"wind_direction_80m"`
+	WindDirection_100m []*float64 `json:"wind_direction_100m,omitempty"`
+	WindDirection_120m []*float64 `json:"wind_direction_120m"`
+	WindDirection_180m []*float64 `json:"wind_direction_180m"`
+	WindDirection_200m []*float64 `json:"wind_direction_200m,omitempty"`
 }
 
 // -----------------------------------------------------------------------------
