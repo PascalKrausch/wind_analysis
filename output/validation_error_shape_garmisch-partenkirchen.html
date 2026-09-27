@@ -1,0 +1,37 @@
+
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>Awesome go-echarts</title>
+    <script src="https://go-echarts.github.io/go-echarts-assets/assets/echarts.min.js"></script>
+    <script src="https://go-echarts.github.io/go-echarts-assets/assets/themes/westeros.js"></script>
+
+<style>
+html, body {
+	margin: 0;
+	padding: 0;
+	width: 100%;
+}
+body > div:first-child {
+	width: 100% !important;
+	min-height: 700px !important;
+}
+</style>
+</head>
+
+<body><div class="container">
+    <div class="item" id="EhvkdqqMUUCQ" style="width:100%;height:800px;"></div>
+</div><script type="text/javascript">
+    "use strict";
+    let goecharts_EhvkdqqMUUCQ = echarts.init(document.getElementById('EhvkdqqMUUCQ'), "westeros", { renderer: "canvas" });
+    let option_EhvkdqqMUUCQ = {"legend":{"show":true},"series":[{"name":"Skewness","type":"bar","data":[{"value":2.0076255741913838},{"value":3.5675494685287483},{"value":0.15300967167668808},{"value":0.7434892590710931}]},{"name":"Kurtosis","type":"bar","data":[{"value":15.513678033825641},{"value":22.888253967425953},{"value":9.983736942643878},{"value":10.361231942243359}]}],"title":{"text":"Fehlerverteilung je Höhe","subtext":"Skewness & Kurtosis (Garmisch-Partenkirchen)"},"toolbox":{"show":true,"feature":{"saveAsImage":{"show":true,"title":"Speichern"},"dataZoom":{"show":true,"icon":null,"title":{"back":"Zurück","zoom":"Zoom"}},"restore":{"show":true,"title":"Reset"}}},"tooltip":{"show":true,"trigger":"axis"},"xAxis":[{"name":"Höhe [m]","data":["80","120","180","200"]}],"yAxis":[{"name":"Wert"}]}
+
+    goecharts_EhvkdqqMUUCQ.setOption(option_EhvkdqqMUUCQ);
+</script>
+<style>
+    .container {margin-top:30px; display: flex;justify-content: center;align-items: center;}
+    .item {margin: auto;}
+</style>
+</body>
+</html>

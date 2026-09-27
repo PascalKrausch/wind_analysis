@@ -100,6 +100,17 @@ type FetchTask struct {
 	RetryCount   int       `json:"retry_count"`
 }
 
+// BatchFetchTask repräsentiert einen gebündelten Task für multiple Locations
+type BatchFetchTask struct {
+	ID             string    `json:"id"`
+	Locations      []Location `json:"locations"`
+	Latitudes      []float64  `json:"latitudes"`
+	Longitudes     []float64  `json:"longitudes"`
+	StartDate      time.Time  `json:"start_date"`
+	EndDate        time.Time  `json:"end_date"`
+	RetryCount     int        `json:"retry_count"`
+}
+
 // TaskResult dient dem Monitoring und Logging der verarbeiteten Jobs
 type TaskResult struct {
 	Task         FetchTask `json:"task"`

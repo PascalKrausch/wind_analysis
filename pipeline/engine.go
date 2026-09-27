@@ -131,6 +131,22 @@ func (e *Engine) worker(
 		default:
 		}
 
+		// NULL-aware Caching Check vor API-Call
+		shouldFetch, err := e.db.ShouldFetchData(ctx, task.LocationName, task.StartDate, task.EndDate)
+		if err != nil {
+			log.Printf("[Worker %d] Caching-Check fehlgeschlagen für Task %s: %v → Fetchen", id, task.ID, err)
+			shouldFetch = true
+		}
+
+		if !shouldFetch {
+			log.Printf("[Worker %d] Skip %s: Daten vollständig und ohne NULL-Werte", id, task.ID)
+			done := atomic.AddInt64(processedTasks, 1)
+			if done%10 == 0 || done == int64(totalTasks) {
+				log.Printf("Progress: [%d/%d] Tasks abgearbeitet (%.1f%%)", done, totalTasks, (float64(done)/float64(totalTasks))*100)
+			}
+			continue
+		}
+
 		// Rate Limiter Token anfordern
 		if err := e.rateLimiter.Wait(ctx); err != nil {
 			return // Context storniert

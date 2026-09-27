@@ -3,6 +3,7 @@ package database
 import (
 	"context"
 	"fmt"
+	"time"
 	"wind_analysis/models"
 
 	"github.com/jackc/pgx/v5"
@@ -287,4 +288,45 @@ func (db *DB) SaveBatchWindData(ctx context.Context, records []models.WindRecord
 	}
 
 	return nil
+}
+
+// ShouldFetchData prüft ob Daten für einen Zeitraum neu geladen werden sollen
+// mit NULL-aware Recovery Logik
+func (db *DB) ShouldFetchData(ctx context.Context, locationName string, start, end time.Time) (bool, error) {
+	var totalCount, nullCount int
+
+	// NULL-aware Query: Prüft Gesamtanzahl und Anzahl von NULL-Werten
+	err := db.Conn.QueryRow(ctx, `
+		SELECT
+			COUNT(*) as total,
+			COUNT(*) - COUNT(wind_speed_10m) as null_count
+		FROM wind_logs
+		WHERE location_name = $1 AND time BETWEEN $2 AND $3
+	`, locationName, start, end).Scan(&totalCount, &nullCount)
+
+	if err != nil {
+		return true, err // Bei Fehler: fetchen
+	}
+
+	// Keine Daten vorhanden → fetchen
+	if totalCount == 0 {
+		return true, nil
+	}
+
+	// NULL-Daten Check (Hauptproblem des Users)
+	if nullCount > 0 {
+		fmt.Printf("NULL-Daten gefunden (%d/%d) für %s %s-%s → Refetch\n",
+			nullCount, totalCount, locationName, start.Format("2006-01-02"), end.Format("2006-01-02"))
+		return true, nil
+	}
+
+	// Completeness Check (für partielle API-Fehler)
+	expectedCount := int(end.Sub(start).Hours())
+	if expectedCount > 0 && float64(totalCount) < float64(expectedCount)*0.9 {
+		fmt.Printf("Unvollständige Daten (%d/%d erwartet) für %s → Refetch\n",
+			totalCount, expectedCount, locationName)
+		return true, nil
+	}
+
+	return false, nil // Alles gut → skippen
 }
