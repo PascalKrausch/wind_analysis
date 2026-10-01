@@ -50,8 +50,6 @@ func main() {
 	fmt.Println("🚀 Starte Standardlauf: Einzel-Analysen & Standortvergleich")
 
 	// 6. Einzelstandort-Analysen durchführen
-	successfulLocations := make([]models.Location, 0, len(config.LocationList))
-
 	for _, location := range config.LocationList {
 		fmt.Printf("\n📍 Starte Analyse für Standort: %s\n", location.Name)
 		locConfig := analysisConfig
@@ -62,17 +60,16 @@ func main() {
 			continue
 		}
 
-		successfulLocations = append(successfulLocations, location)
 	}
 
-	// 7. Standortübergreifender Vergleich (nur wenn mindestens 2 Standorte Daten geliefert haben)
-	if len(successfulLocations) >= 2 {
-		fmt.Println("\n📊 Starte standortübergreifenden Vergleich...")
-		if err := validation.RunLocationComparison(ctx, db, analysisConfig, successfulLocations); err != nil {
+	// 7. Vergleich und Master-Dashboard für alle konfigurierten Standorte
+	if len(config.LocationList) > 0 {
+		fmt.Println("\n📊 Starte Standortvergleich und Master-Dashboard...")
+		if err := validation.RunLocationComparison(ctx, db, analysisConfig, config.LocationList); err != nil {
 			fmt.Printf("⚠️ Fehler beim Standortvergleich: %v\n", err)
 		}
 	} else {
-		fmt.Println("\nℹ️ Standortvergleich übersprungen (weniger als 2 erfolgreiche Standorte).")
+		fmt.Println("\nℹ️ Standortvergleich und Master-Dashboard übersprungen (keine Standorte konfiguriert).")
 	}
 
 	fmt.Println("\n✅ Analyse erfolgreich abgeschlossen!")

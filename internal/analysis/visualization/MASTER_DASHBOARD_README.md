@@ -91,6 +91,8 @@ master, err := visualization.MapMultipleLocationsToMasterDashboard(
 )
 ```
 
+Beim Mapping werden Validierungsmetriken standortweise übernommen; Werte anderer Standorte werden nicht in die jeweilige Standortansicht gemischt. Die Standortliste enthält auch konfigurierte Standorte ohne Messwerte. Zeitbereiche ignorieren Zeitstempel ohne Wert, und ungültige Windgeschwindigkeiten bzw. Hellmann-Exponenten werden nicht als Datenpunkte übernommen.
+
 ### 4. Daten abrufen
 
 ```go
@@ -113,54 +115,26 @@ if master.HasValidationData("location1") {
 locations := master.GetLocationsForChart()
 ```
 
-## Integration in die Analyse-Pipeline
+## Master-Dashboard erzeugen und bedienen
 
-Die Datenstrukturen sind so konzipiert, dass sie sich nahtlos in die existierende Analyse-Pipeline integrieren lassen:
+`PlotMasterDashboard` rendert Zeitreihen, Validierungsmetriken und Verteilungs-Fits gemeinsam in eine HTML-Datei:
 
 ```go
-// In cmd/analyser/main.go oder validation/processor.go
-func RunMasterDashboardAnalysis(ctx context.Context, db *database.DB, config Config, locationList []models.Location) error {
-    master := visualization.NewMasterDashboardData()
-    
-    for _, location := range locationList {
-        // Daten laden wie bisher
-        records, err := db.LoadWindData(ctx, location.Name, config.StartTime, config.EndTime)
-        if err != nil {
-            continue
-        }
-        
-        // Analysen durchführen wie bisher
-        exponents := interpolation.CalculateHellmannExponentsForDataset(records)
-        validationByLocation := interpolation.ValidatePowerLawModelByLocation(records, exponents)
-        
-        // Verteilungs-Analyse
-        distributionInputs, err := fitting.FindBestFitsForLocation(location.Name, records, fitters, nil)
-        
-        // Zum Master-Dashboard hinzufügen
-        locationMaster, err := visualization.MapLocationToMasterDashboard(
-            location, records, exponents, validationByLocation, distributionInputs,
-        )
-        
-        // Daten zusammenführen
-        master.WindSpeedData[location.Name] = locationMaster.WindSpeedData[location.Name]
-        master.HellmannData[location.Name] = locationMaster.HellmannData[location.Name]
-        // ... etc
-    }
-    
-    // Master-Dashboard rendern (nächster Schritt)
-    // visualization.PlotMasterDashboard(master, outputPath)
-    
-    return nil
+master, err := visualization.MapMultipleLocationsToMasterDashboard(
+    locations,
+    recordsMap,
+    exponentsMap,
+    validationByLocation,
+    distributionInputsMap,
+)
+if err != nil {
+    return err
+}
+if err := visualization.PlotMasterDashboard(master, outputPath); err != nil {
+    return err
 }
 ```
 
-## Nächste Schritte
+Das Dashboard bietet Standortauswahl mit Mehrfachauswahl für Vergleiche. Der Zeitraumfilter gilt ausschließlich für Windgeschwindigkeits- und Hellmann-Zeitreihen; Validierungsmetriken und Verteilungs-Fits werden davon nicht verändert. Fehlen für einen ausgewählten Standort im gefilterten Zeitraum darstellbare Werte, erscheint beim betreffenden Zeitreihen-Chart eine Fehlermeldung statt einer leeren Grafik.
 
-Die implementierten Datenstrukturen und Mapping-Funktionen bilden das Fundament für das Master-Dashboard. Die nächsten Schritte sind:
-
-1. **UI-Komponenten implementieren**: Dropdown für Standortauswahl, Filter-Buttons, Tabs
-2. **JavaScript für dynamische Filterung**: Basierend auf dem existierenden `getDynamicZoomJS` Muster
-3. **Master-Dashboard Generator**: Die `PlotMasterDashboard` Funktion, die alle Charts in einer Page kombiniert
-4. **Integration in die Pipeline**: Anpassung von `cmd/analyser/main.go` um das Master-Dashboard zu generieren
-
-Die aktuelle Implementierung ist vollständig getestet und bereit für die Erweiterung um die UI-Komponenten.
+Der Analyse-Lauf für den Standortvergleich speichert das Dashboard als `master_dashboard.html` im konfigurierten Ausgabeverzeichnis. Bestehende Einzel- und Vergleichsausgaben werden weiterhin erzeugt.

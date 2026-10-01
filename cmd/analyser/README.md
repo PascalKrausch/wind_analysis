@@ -71,6 +71,7 @@ Der Analyser erstellt folgende Visualisierungen im angegebenen Ausgabeverzeichni
 
 ### Standortvergleich
 1. **Vergleich**: `location_comparison.html` - Multi-Line-Chart der Hellmann-Exponenten für alle Standorte mit DataZoom
+2. **Master-Dashboard**: `master_dashboard.html` - Windgeschwindigkeits- und Hellmann-Zeitreihen, Validierungsmetriken sowie Verteilungs-Fits. Standorte sind einzeln oder per Mehrfachauswahl vergleichbar; der Zeitraumfilter wirkt nur auf die Zeitreihen.
 
 ## Chart-Features
 

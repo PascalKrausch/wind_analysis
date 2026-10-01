@@ -147,6 +147,8 @@ func RunLocationComparison(ctx context.Context, db *database.DB, config Config, 
 	var allExponents []interpolation.HellmannExponentResult
 	var allRecordsFrom2022 []models.WindRecord
 	var allPlotInputs []fitting.AnalysisPlotInput
+	recordsByLocation := make(map[string][]models.WindRecord, len(locationList))
+	exponentsByLocation := make(map[string][]interpolation.HellmannExponentResult, len(locationList))
 	var timeSeriesList []visualization.LocationTimeSeries
 	var windSpeedSeriesList []visualization.LocationTimeSeries
 
@@ -168,6 +170,7 @@ func RunLocationComparison(ctx context.Context, db *database.DB, config Config, 
 			fmt.Printf("  ⚠️ Keine Daten für %s gefunden\n", location.Name)
 			continue
 		}
+		recordsByLocation[location.Name] = records
 
 		if windTS, err := buildWindSpeedTimeSeriesForLocation(location.Name, records); err == nil {
 			windSpeedSeriesList = append(windSpeedSeriesList, windTS)
@@ -180,6 +183,7 @@ func RunLocationComparison(ctx context.Context, db *database.DB, config Config, 
 			fmt.Printf("  ⚠️ Keine gültigen Exponenten für %s\n", location.Name)
 			continue
 		}
+		exponentsByLocation[location.Name] = exponents
 		allExponents = append(allExponents, exponents...)
 		timeSeriesList = append(timeSeriesList, mapExponentsToTimeSeries(location.Name, exponents))
 
@@ -200,16 +204,41 @@ func RunLocationComparison(ctx context.Context, db *database.DB, config Config, 
 		fmt.Printf("  ✅ %d Exponenten für %s\n", len(exponents), location.Name)
 	}
 
-	if len(allExponents) == 0 {
-		return fmt.Errorf("keine Exponenten für Standortvergleich gesammelt")
+	vizInputs := make([]visualization.DistributionPlotInput, 0, len(allPlotInputs))
+	distributionInputsByLocation := make(map[string][]visualization.DistributionPlotInput)
+	for _, p := range allPlotInputs {
+		input := mapFittingToVizInput(p)
+		vizInputs = append(vizInputs, input)
+		distributionInputsByLocation[input.LocationName] = append(distributionInputsByLocation[input.LocationName], input)
 	}
 
-	// Standortvergleich der Exponenten zeichnen
-	comparisonPath := utils.BuildOutputPath(config.OutputDir, "location_comparison.html")
-	if err := visualization.PlotMultiLocationTimeline(timeSeriesList, "Hellmann-Exponent: Standortvergleich", "Hellmann-Exponent α", comparisonPath); err != nil {
-		return fmt.Errorf("fehler beim Erstellen des Standortvergleichs: %w", err)
+	validationByLocation := interpolation.ValidatePowerLawModelByLocation(allRecordsFrom2022, allExponents)
+	master, err := visualization.MapMultipleLocationsToMasterDashboard(
+		locationList,
+		recordsByLocation,
+		exponentsByLocation,
+		validationByLocation,
+		distributionInputsByLocation,
+	)
+	if err != nil {
+		return fmt.Errorf("Master-Dashboard-Daten konnten nicht zusammengestellt werden: %w", err)
 	}
-	fmt.Printf("📈 Standortvergleich gespeichert: %s\n", comparisonPath)
+	masterDashboardPath := utils.BuildOutputPath(config.OutputDir, "master_dashboard.html")
+	if err := visualization.PlotMasterDashboard(master, masterDashboardPath); err != nil {
+		return fmt.Errorf("Master-Dashboard konnte nicht erstellt werden: %w", err)
+	}
+	fmt.Printf("📊 Master-Dashboard gespeichert: %s\n", masterDashboardPath)
+
+	// Standortvergleich der Exponenten zeichnen
+	if len(timeSeriesList) > 0 {
+		comparisonPath := utils.BuildOutputPath(config.OutputDir, "location_comparison.html")
+		if err := visualization.PlotMultiLocationTimeline(timeSeriesList, "Hellmann-Exponent: Standortvergleich", "Hellmann-Exponent α", comparisonPath); err != nil {
+			return fmt.Errorf("fehler beim Erstellen des Standortvergleichs: %w", err)
+		}
+		fmt.Printf("📈 Standortvergleich gespeichert: %s\n", comparisonPath)
+	} else {
+		fmt.Println("ℹ️ Hellmann-Standortvergleich übersprungen (keine gültigen Exponenten vorhanden).")
+	}
 
 	// Standortvergleich der Windgeschwindigkeit zeichnen
 	if len(windSpeedSeriesList) >= 2 {
@@ -231,17 +260,16 @@ func RunLocationComparison(ctx context.Context, db *database.DB, config Config, 
 	}
 
 	// Globale Validierungsmetriken
-	if err := runGlobalValidationMetrics(config, allRecordsFrom2022, allExponents); err != nil {
-		return handleOptionalStep(config, "globale Validierung fehlgeschlagen", err)
+	if len(allRecordsFrom2022) > 0 && len(allExponents) > 0 {
+		if err := runGlobalValidationMetrics(config, allRecordsFrom2022, allExponents); err != nil {
+			return handleOptionalStep(config, "globale Validierung fehlgeschlagen", err)
+		}
+	} else {
+		fmt.Println("ℹ️ Globale Validierung übersprungen (keine geeigneten Daten vorhanden).")
 	}
 
 	// Verteilungs-Übersicht erstellen
-	if len(allPlotInputs) > 0 {
-		vizInputs := make([]visualization.DistributionPlotInput, 0, len(allPlotInputs))
-		for _, p := range allPlotInputs {
-			vizInputs = append(vizInputs, mapFittingToVizInput(p))
-		}
-
+	if len(vizInputs) > 0 {
 		distributionComparisonPath := utils.BuildOutputPath(config.OutputDir, "distribution_location_comparison.html")
 		if err := visualization.PlotDistributionDashboard(vizInputs, distributionComparisonPath); err != nil {
 			fmt.Printf("⚠️ Fehler beim Erstellen des Verteilungsvergleichs: %v\n", err)

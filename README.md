@@ -1,418 +1,581 @@
-# Wind Analysis - Wind Data Pipeline & Statistical Analysis
+# wind_analysis
 
-**⚠️ Hinweis:** Lernprojekt zur praktischen Anwendung von statistischen Methoden und numerischen Verfahren in Go. Nicht für produktive Windenergie-Planung geeignet.
+Eine in **Go** entwickelte Datenpipeline zur Sammlung, Verarbeitung und statistischen Analyse historischer Winddaten.
 
-## 📈 Aktuelle Verbesserungen
+Das Projekt kombiniert **konkurrenten API-Datenabruf, PostgreSQL/TimescaleDB, statistische Verteilungsmodelle und interaktive Visualisierung**.
 
-### ✅ Recent Updates (2026-09-20)
+Es handelt sich um ein eigenständiges Engineering-Projekt mit Fokus auf Datenpipelines, numerische Verfahren und eine wartbare Go-Architektur.
 
-- **Grid-Metadaten-Integration**: Speicherung der tatsächlichen Open-Meteo Grid-Koordinaten und Elevation
-- **Methodische Sauberkeit**: Berücksichtigung von Grid-to-Point discrepancies in meteorologischen Modellen
-- **UPSERT-Optimierung**: Kombination aus CopyFrom-Geschwindigkeit und UPSERT-Sicherheit via Staging-Tabelle
-- **Deduplizierung**: Automatische Batch-interne Deduplizierung mit UNIQUE Constraints
-- **Performance-Steigerung**: Optimierte Pipeline-Parameter (concurrency: 4, batch_size: 1000, rate_limit_rps: 4)
-- **Standort-Erweiterung**: 11 methodisch ausgewählte Standorte (Küste, Mittelgebirge, Alpenvorland, Binnenland)
-- **Windgeschwindigkeitseinheiten**: Sicherstellung von m/s-Format über alle API-Endpunkte
+> **Hinweis:** Das Projekt dient der technischen Untersuchung, dem Lernen und der statistischen Analyse. Es ist **kein professionelles Werkzeug für Windenergieplanung oder Investitionsentscheidungen**.
 
-## 🎯 Projektziel
+---
 
-Statistische Analyse von Windgeschwindigkeitsdaten mittels generischer Verteilungsanalyse, automatischer Modellauswahl und Performance-optimierter Datenverarbeitung.
+## 🎯 Ziel des Projekts
+
+Ziel ist der Aufbau einer reproduzierbaren Pipeline zur Analyse von Windgeschwindigkeiten an unterschiedlichen Standorten und Messhöhen.
+
+Das System deckt den gesamten Ablauf ab:
+
+```text
+Open-Meteo API
+      ↓
+Konkurrenter Datenabruf
+      ↓
+Rate Limiting / Retries
+      ↓
+Datenbereinigung
+      ↓
+PostgreSQL / TimescaleDB
+      ↓
+Statistische Analyse
+      ↓
+Anpassung statistischer Modelle
+      ↓
+Modellbewertung
+      ↓
+Interaktive Visualisierung
+```
+
+Die Architektur ist bewusst so aufgebaut, dass sich Datenerfassung und statistische Analyse unabhängig voneinander weiterentwickeln lassen.
+
+---
+
+## 🚀 Was das Projekt zeigt
+
+### Datenverarbeitung
+
+* Konkurrierender Abruf von Wetterdaten
+* Worker-Pool-basierte Verarbeitung
+* Konfigurierbares API-Rate-Limiting
+* Retry- und Fallback-Mechanismen
+* Batch-Verarbeitung
+* PostgreSQL-Bulk-Inserts
+* Staging-Tabellen mit UPSERT-Verarbeitung
+* Deduplizierung innerhalb von Batches
+* Datenintegrität über Datenbank-Constraints
+
+### Statistische Analyse
+
+* Deskriptive Statistik
+* Pearson-, Spearman- und Kendall-Korrelation
+* Weibull-Verteilung
+* Gamma-Verteilung
+* Lognormalverteilung
+* Maximum-Likelihood-Schätzung
+* AIC / BIC
+* Kolmogorov-Smirnov-Test
+* RMSE-basierte Bewertung
+* Automatische Auswahl des passenden Modells
+
+### Numerische Verfahren
+
+* Interpolation von Windprofilen über ein Power-Law-Modell
+* Höhenabhängige Analyse der Windgeschwindigkeit
+* Validierung von Interpolationsmodellen
+* Bewusster Umgang mit meteorologischen Modelldaten und deren Gitterpunkten
+
+### Go-Architektur
+
+* Interface-basierte Architektur
+* Dependency Injection
+* Schichtenorientierte Paketstruktur
+* Pipeline-orientierte Nebenläufigkeit
+* Trennung von Datenzugriff und Analyse
+* Schrittweise Überführung von fachlich spezialisierter Logik in generische Komponenten
+
+---
 
 ## 🏗️ Architektur
 
-```
-wind-analysis/
+```text
+wind_analysis/
+│
 ├── cmd/
-│   ├── fetcher/         # Einfacher Fetcher für einzelne Standorte
-│   └── analyser/        # Statistische Analysen & Visualisierungen
+│   ├── fetcher/
+│   │   └── main.go
+│   └── analyser/
+│       └── main.go
+│
 ├── internal/
-│   ├── client/          # Open-Meteo API Client mit Rate-Limiting
-│   ├── database/        # PostgreSQL/TimescaleDB Integration
-│   ├── utils/           # Utility-Funktionen (Filename-Sanitization, etc.)
-│   └── analysis/
-│       ├── interpolation/   # Power-Law Windprofil-Interpolation
-│       ├── statistics/      # Deskriptive Statistik, Korrelation, Verteilungen
-│       ├── distribution/    # Generische Verteilungsanalyse (Weibull, Gamma, Log-Normal)
-│       │   ├── types.go            # Interface-Definitionen (ContinuousDistribution, Fitter)
-│       │   ├── weibull.go          # Weibull-Verteilung (mit Interface-Implementierung)
-│       │   ├── gamma.go            # Gamma-Verteilung
-│       │   ├── log_normal.go       # Log-Normal-Verteilung
-│       │   ├── fitter.go           # Automatische Modellauswahl (SelectBestModel)
-│       │   └── data_cleaning.go    # Generische Datenbereinigung
-│       ├── validation/      # Validierungs-Orchestrierung
-│       ├── weibull/         # Legacy Weibull-Verarbeitungslogik (wind-spezifisch)
-│       └── visualization/   # Chart-Erstellung (go-echarts)
-│           ├── distribution_plot.go # Generische Verteilungs-Visualisierung
-│           └── weibull_plot.go      # Weibull-spezifische Visualisierung
-├── pipeline/            # Concurrency-Engine für parallele Datenabfrage
-├── models/              # Datenstrukturen & Konfiguration
-├── config.yaml          # Standorte & Pipeline-Konfiguration
-└── docker-compose.yml   # Datenbank-Setup
+│   ├── client/
+│   │   └── Open-Meteo API-Client
+│   │
+│   ├── database/
+│   │   └── PostgreSQL / TimescaleDB-Zugriff
+│   │
+│   ├── analysis/
+│   │   ├── interpolation/
+│   │   ├── statistics/
+│   │   ├── distribution/
+│   │   ├── validation/
+│   │   ├── weibull/
+│   │   └── visualization/
+│   │
+│   └── utils/
+│
+├── pipeline/
+│   └── Engine für konkurrierende Datenerfassung
+│
+├── models/
+│   └── Konfiguration und Domänenmodelle
+│
+├── config.yaml
+├── docker-compose.yml
+├── go.mod
+└── README.md
 ```
 
-## 🏛️ Architektur-Prinzipien
+Die Trennung soll die wichtigsten Verantwortlichkeiten unabhängig voneinander halten:
 
-Das Projekt folgt etablierten Software-Architektur-Patterns:
+* API-Kommunikation
+* Pipeline-Steuerung
+* Persistenz
+* statistische Analyse
+* Visualisierung
 
-- **Layered Architecture**: Klare Trennung zwischen Entry Points, Business Logic und Data Access
-- **Domain-Driven Design**: Packages nach fachlichen Domänen strukturiert
-- **Interface-Based Design**: Generische Interfaces für Verteilungen (`ContinuousDistribution`, `Fitter`)
-- **Strategy Pattern**: Austauschbare Verteilungs-Implementierungen und Fitting-Algorithmen
-- **Dependency Injection**: Konstruktoren nehmen Abhängigkeiten als Parameter für Testbarkeit
-- **Context-First Pattern**: Alle asynchronen Funktionen verwenden `context.Context`
-- **Pipeline Pattern**: Fan-Out/Fan-In für parallele Datenverarbeitung
-- **Repository Pattern**: Datenbankzugriffe gekapselt in dedizierten Packages
-- **Separation of Concerns**: Datenbereinigung, Fitting und Visualisierung sind getrennt
+---
 
-## 🔬 Architektur-Details: Generische Verteilungsanalyse
+## ⚙️ Pipeline und Nebenläufigkeit
 
-Das Projekt verwendet eine moderne, interface-basierte Architektur für die statistische Analyse:
+Der Fetcher verwendet eine konfigurierbare Worker-Pipeline, um mehrere Standorte gleichzeitig zu verarbeiten.
 
-### Core Interfaces
+```text
+                 ┌── Worker 1 ──┐
+Standorte ───────┼── Worker 2 ──┼──────► Datenbank
+                 ├── Worker 3 ──┤
+                 └── Worker 4 ──┘
+```
+
+Anzahl der Worker, Batch-Größe und API-Rate-Limit sind konfigurierbar.
+
+Beispiel:
+
+```yaml
+pipeline:
+  concurrency: 4
+  batch_size: 1000
+  rate_limit_rps: 4
+```
+
+Dadurch kann der Durchsatz angepasst werden, ohne den eigentlichen Anwendungscode ändern zu müssen.
+
+---
+
+## 🗄️ Datenbankarchitektur
+
+Für die Zeitreihendaten wird **PostgreSQL mit TimescaleDB** verwendet.
+
+Größere Datenmengen werden nicht einzeln pro Zeile geschrieben. Stattdessen nutzt die Pipeline einen Staging-Ansatz:
+
+```text
+Eingehender Batch
+      ↓
+PostgreSQL COPY
+      ↓
+Staging-Tabelle
+      ↓
+UPSERT
+      ↓
+Produktive Zeitreihentabelle
+```
+
+Damit werden die Vorteile von Bulk Loading mit kontrollierter Konfliktbehandlung und Datenkonsistenz kombiniert.
+
+Zusätzlich verhindern Unique Constraints, dass doppelte Messungen in die Haupttabelle gelangen.
+
+---
+
+## 🧠 Generische Architektur für statistische Verteilungen
+
+Ein zentrales Refactoring des Projekts war die Entwicklung von einer zunächst auf die Weibull-Verteilung zugeschnittenen Analyse hin zu einer generischen, interface-basierten Architektur.
+
+### Zentrales Interface
 
 ```go
-// ContinuousDistribution beschreibt eine kontinuierliche Wahrscheinlichkeitsverteilung
 type ContinuousDistribution interface {
     PDF(x float64) float64
     CDF(x float64) float64
     LogPDF(x float64) float64
     Params() []float64
 }
+```
 
-// Fitter beschreibt eine Schnittstelle zur Parameterschätzung
+### Interface für das Fitting
+
+```go
 type Fitter interface {
     Fit(data []float64) (ContinuousDistribution, error)
     Name() string
 }
 ```
 
-### Aktuelle Implementierungen
+Aktuell sind unter anderem folgende Modelle integriert:
 
-- **Weibull**: `Weibull` struct + `WeibullFitter` (MLE mit Location-Parameter)
-- **Gamma**: `Gamma` struct + `GammaFitter` (Momentenmethode + Thom-Näherung)
-- **Log-Normal**: `LogNormal` struct + `LogNormalFitter` (Analytisches MLE)
+* Weibull
+* Gamma
+* Lognormal
 
-### Automatische Modellauswahl
+Eine weitere Verteilung kann ergänzt werden, indem die entsprechenden Interfaces implementiert und der Fitter in die Modellauswahl integriert wird.
+
+Dadurch bleibt die eigentliche Analyse unabhängig von den Details eines einzelnen statistischen Modells.
+
+---
+
+## 📊 Automatische Modellauswahl
+
+Der Analysator kann mehrere Kandidaten vergleichen und anhand von **AIC** das passendste Modell auswählen.
+
+Beispiel:
 
 ```go
 bestDist, metrics, err := distribution.SelectBestModel(data)
-// Wählt automatisch das beste Modell basierend auf AIC
 ```
 
-### Generische Utilities
+Zusätzlich werden unter anderem folgende Kennzahlen berechnet:
 
-- **Datenbereinigung**: `CleanData()`, `CleanDataWithZero()`, `IsFinite()`
-- **Statistik**: `Summarize()`, `SortedCopy()`
-- **Validierung**: `EvaluateFit()` berechnet AIC, BIC, KS-Test, RMSE
-- **Visualisierung**: `BuildDistributionCurves()`, `NewDistributionDashboard()`
+* AIC
+* BIC
+* KS-Statistik
+* RMSE
 
-### Erweiterbarkeit
+Dadurch können mehrere Modelle über denselben Bewertungsprozess miteinander verglichen werden.
 
-Neue Verteilungen können einfach hinzugefügt werden durch:
-1. Implementierung von `ContinuousDistribution` Interface
-2. Implementierung von `Fitter` Interface
-3. Hinzufügen zum `fitters` Array in `SelectBestModel()`
+---
 
-### Rückwärtskompatibilität
+## 🌬️ Interpolation von Windprofilen
 
-Die Architektur behält die Rückwärtskompatibilität zum bestehenden Weibull-spezifischen Code:
-- Legacy-Funktionen wie `WeibullPDF()`, `WeibullCDF()` sind weiterhin verfügbar
-- `WeibullParams`, `WeibullAnalysisResult` etc. werden für Kompatibilität beibehalten
-- Der `weibull/` Processor funktioniert weiterhin mit wind-spezifischen Daten
+Für Datensätze mit unterschiedlichen verfügbaren Messhöhen wird ein Power-Law-Modell verwendet, um Windgeschwindigkeiten zwischen Höhen abzuschätzen.
 
-### Architektur-Refactoring
+Die Interpolationslogik ist von der statistischen Verteilungsanalyse getrennt, sodass beide Bereiche unabhängig voneinander weiterentwickelt und überprüft werden können.
 
-Der Übergang von Weibull-spezifischer zu generischer Architektur erfolgte in mehreren Schritten:
+Zusätzlich werden die tatsächlichen Gitterkoordinaten und die vom Wetterdatenanbieter gelieferte Gitterhöhe gespeichert.
 
-1. **Interface-Definition**: Einführung von `ContinuousDistribution` und `Fitter` Interfaces
-2. **Weibull-Entkopplung**: `Weibull` struct implementiert `ContinuousDistribution`, `WeibullFitter` implementiert `Fitter`
-3. **Datenbereinigung**: Extraktion von `cleanWindSpeedData()` zu generischem `CleanData()`
-4. **Visualisierung**: Einführung von `DistributionPlotInput` und generischen Chart-Funktionen
-5. **Andere Verteilungen**: Gamma und Log-Normal implementierten bereits das generische Muster
+Dadurch lässt sich unterscheiden zwischen:
 
-### Vorteile der neuen Architektur
-
-- **Erweiterbarkeit**: Neue Verteilungen können ohne Änderung bestehenden Codes hinzugefügt werden
-- **Wiederverwendbarkeit**: Generische Funktionen (Datenbereinigung, Validierung, Visualisierung) für alle Verteilungen
-- **Testbarkeit**: Interfaces erleichtern Unit-Testing mit Mocks
-- **Wartbarkeit**: Klare Trennung der Zuständigkeiten und konsistente APIs
-- **Flexibilität**: Automatische Modellauswahl ermöglicht datengetriebene Entscheidungen
-
-## 🚀 Funktionalität
-
-### Implementiert
-
-- **Open-Meteo API Integration**: Abruf von Winddaten für verschiedene Höhen (10m, 80m, 100m, 120m, 180m, 200m)
-- **Automatische API-Auswahl**: Intelligente Wahl zwischen Forecast, Historical Forecast und Archive API
-- **Grid-Metadaten-Dokumentation**: Speicherung der tatsächlichen Grid-Koordinaten und Elevation von Open-Meteo
-- **Methodisch saubere Grid-Point-Handling**: Berücksichtigung von Grid-to-Point discrepancies in meteorologischen Modellen
-- **Concurrency Pipeline**: Parallele Datenabfrage mit konfigurierbaren Worker-Routinen
-- **Rate-Limiting**: Konfigurierbare API-Rate-Limits für stabile Datenabfrage
-- **Power-Law Interpolation**: Windprofil-Interpolation zwischen verschiedenen Höhen (Hellmann-Exponenten)
-- **Batch-Verarbeitung**: Effizientes Speichern großer Datensätze via PostgreSQL COPY mit Staging-Tabelle
-- **Intelligente UPSERT-Logik**: Kombination aus CopyFrom-Geschwindigkeit und UPSERT-Sicherheit
-- **Deduplizierung**: Automatische Batch-interne Deduplizierung basierend auf time/location_name
-- **Datenbank-Speicherung**: PostgreSQL mit TimescaleDB für effiziente Zeitreihen-Abfragen
-- **UNIQUE Constraints**: Verhinderung von Datensatz-Duplikaten durch Datenbank-Constraints
-- **Generische Verteilungsanalyse**: Interface-basierte Architektur für verschiedene Verteilungen
-- **Unterstützte Verteilungen**: Weibull, Gamma, Log-Normal (erweiterbar)
-- **Automatische Modellauswahl**: `SelectBestModel()` wählt automatisch das beste Modell basierend auf AIC
-- **Parameterschätzung**: MLE-basierte Parameterschätzung für alle Verteilungen
-- **Goodness-of-Fit Tests**: KS-Test, AIC, BIC, RMSE für Modellvalidierung
-- **Generische Datenbereinigung**: `CleanData()`, `Summarize()`, `SortedCopy()` für alle Verteilungen
-- **Generische Visualisierung**: `BuildDistributionCurves()`, `NewDistributionDashboard()` für jede Verteilung
-- **Statistische Analyse**: Deskriptive Statistik, Korrelation (Pearson, Spearman, Kendall), Histogramme
-- **Visualisierung**: Interaktive HTML-Charts (Histogramme, PDF/CDF, Heatmaps, Vergleiche)
-- **Validierung**: Power-Law Modellvalidierung mit Fehleranalyse
-
-### In Planung
-
-- **Erweiterte Verteilungen**: Rayleigh, Normal, Log-Logistic, GEV für Extremwertanalyse
-- **Windenergie-Berechnung**: Theoretische Energieerträge und Capacity Factors
-- **Statistische Vergleiche**: Wasserstein-Distanz für zeitliche Veränderungen
-- **Erweiterte Visualisierungen**: Windrosen, Zeitreihen-Dashboards
-- **Processor-Modell-Umbau**: Migration von weibull/ zu generischem distribution/ Processor
-
-## 📋 Voraussetzungen
-
-- Go 1.20+
-- PostgreSQL mit TimescaleDB Extension
-- Docker & Docker Compose
-
-## 🔧 Installation
-
-```bash
-# 1. Repository klonen
-git clone <repo-url>
-cd wind_analysis
-
-# 2. Abhängigkeiten installieren
-go mod download
-
-# 3. Datenbank starten
-docker-compose up -d
-
-# 4. Konfiguration anpassen (config.yaml)
-# Standorte, Zeitraum und Pipeline-Parameter konfigurieren
-
-# 5. Schema initialisieren (beim ersten Start)
-# Das Schema wird automatisch beim ersten Pipeline-Lauf erstellt
+```text
+angeforderte Koordinate
+        vs.
+tatsächlich verwendeter meteorologischer Gitterpunkt
 ```
 
-### Datenbank-Management
+und diese Differenz wird nicht stillschweigend ignoriert.
+
+---
+
+## 🌍 Datenquelle
+
+Die Pipeline nutzt die **Open-Meteo API** und wählt abhängig vom angefragten Zeitraum automatisch zwischen den verfügbaren Endpunkten.
+
+Unterstützt werden:
+
+* Forecast-Daten
+* historische Forecast-Daten
+* Archivdaten
+
+Die Datenerfassung kann für mehrere konfigurierbare Standorte und Höhen erfolgen.
+
+---
+
+## 📈 Visualisierung
+
+Der Analysator erzeugt interaktive HTML-Ausgaben, unter anderem:
+
+* Histogramme von Windgeschwindigkeiten
+* Wahrscheinlichkeitsdichtefunktionen
+* kumulative Verteilungsfunktionen
+* Modellvergleiche
+* Standortvergleiche
+* Heatmaps
+* Analysen von Windprofilen
+* Validierungsdiagramme
+
+Die erzeugten Dateien werden im Verzeichnis `output` abgelegt.
+
+---
+
+## 🧪 Beispielanalyse
+
+Nach der Datenerfassung kann die Analyse gestartet werden:
 
 ```bash
-# Datenbank neu starten (bei Schema-Änderungen)
-docker-compose down -v
-docker-compose up -d
-
-# Pipeline starten (lädt Daten für alle Standorte)
-go run cmd/fetcher/main.go
-
-# Analyser starten (analysiert geladene Daten)
 go run cmd/analyser/main.go
 ```
 
-## 🚀 Nutzung
+Der Analysator liest die konfigurierte Datenbasis ein und erzeugt die entsprechenden statistischen Auswertungen und Visualisierungen.
 
-### Datenabfrage (Pipeline)
+---
 
-Parallele Abfrage mehrerer Standorte für einen Zeitraum:
+## ⚡ Performance und Skalierung
+
+Die Architektur berücksichtigt, dass die externe API der wichtigste limitierende Faktor für den Datendurchsatz ist.
+
+Daher liegt der Fokus auf:
+
+* parallelen Requests
+* explizitem API-Rate-Limiting
+* Batch-Verarbeitung
+* PostgreSQL `COPY`
+* Staging-Tabellen mit UPSERT
+* Deduplizierung auf Datenbankebene
+
+Mit der aktuellen Konfiguration ist die Datenbank auf effiziente Verarbeitung größerer Batches ausgelegt, während der externe API-Abruf den wesentlichen Flaschenhals darstellt.
+
+---
+
+## 🛠️ Tech-Stack
+
+### Sprache
+
+* **Go 1.25+**
+
+### Daten & Persistenz
+
+* **PostgreSQL**
+* **TimescaleDB**
+* **pgx/v5**
+
+### Statistik & Mathematik
+
+* **gonum/stat**
+* **gonum/mathext**
+
+### Visualisierung
+
+* **go-echarts**
+
+### Konfiguration
+
+* **YAML (`gopkg.in/yaml.v3`)**
+
+### Externe API
+
+* **Open-Meteo**
+
+---
+
+## 📦 Voraussetzungen
+
+* Go 1.25+
+* Docker
+* Docker Compose
+* PostgreSQL mit TimescaleDB
+
+Die enthaltene Docker-Konfiguration ist der einfachste Weg, die Datenbank lokal zu starten.
+
+---
+
+## 🔧 Einrichtung
+
+### 1. Repository klonen
 
 ```bash
-# Pipeline starten (lädt Daten für alle Standorte in config.yaml)
-go run cmd/fetcher/main.go -config config.yaml
+git clone https://github.com/PascalKrausch/wind_analysis.git
+cd wind_analysis
 ```
 
-Die Pipeline-Konfiguration erfolgt über `config.yaml`:
+### 2. Abhängigkeiten herunterladen
+
+```bash
+go mod download
+```
+
+### 3. Datenbank starten
+
+```bash
+docker compose up -d
+```
+
+### 4. Analyse konfigurieren
+
+Über `config.yaml` lassen sich unter anderem folgende Parameter festlegen:
+
+* Standorte
+* Zeitraum
+* Anzahl der Worker
+* Batch-Größe
+* API-Rate-Limit
+
+Beispiel:
 
 ```yaml
 locationlist:
-  - name: Husum         <- Ändern oder Ergänzen
+  - name: Husum
     latitude: 54.4878
     longitude: 9.0556
+
   - name: Harz
     latitude: 51.7967
     longitude: 10.6206
-  # ... weitere Standorte (aktuell 12 Standorte: Küste, Mittelgebirge, Alpenvorland, Binnenland)
 
-timeframe:              <- Zeitraum anpassen
-  start: "2022-01-01"  # Empfohlen: 2022+ für volles Höhenprofil
+timeframe:
+  start: "2022-01-01"
   end: "2026-09-19"
   chunk_years: 2
 
-pipeline:               <- Go-Worker anpassen
-  concurrency: 4      # Parallele Worker-Routinen
-  batch_size: 1000     # DB Bulk-Insert Schwelle
-  rate_limit_rps: 4    # API Rate Limit
+pipeline:
+  concurrency: 4
+  batch_size: 1000
+  rate_limit_rps: 4
 ```
 
-### API-Endpoint-Logik
-
-Automatische Auswahl basierend auf Zeitraum:
-- **Letzte 5 Tage**: Forecast API mit `past_days` (volles Höhenprofil)
-- **2022-heute**: Historical Forecast API (volles Höhenprofil, 9km Auflösung)
-- **Vor 2022**: Archive API (10m, 100m + Power Law Interpolation, ERA5 0.25°/ERA5-Land 0.1°)
-
-### Performance-Schätzung
-
-Basierend auf aktuellen Konfigurationseinstellungen (concurrency: 4, rate_limit_rps: 4, batch_size: 1000):
-
-**Zeitraum 2022-2026 (4.75 Jahre):**
-- **6 Orte** (~250k Datensätze): ~30 Sekunden
-- **12 Orte** (~500k Datensätze): ~55 Sekunden
-- **15 Orte** (~625k Datensätze): ~70 Sekunden
-
-Die optimierte UPSERT-Logik mit Staging-Tabelle macht den Datenbank-Layer zum performancesstarken Teil - der API-Layer ist der Haupt-Bottleneck.
-
-### Standortauswahl & Repräsentativität
-
-Die aktuellen 12 Standorte wurden nach Kriterien der Vielfalt, Relevanz und Repräsentativität ausgewählt:
-
-**Topografische Vielfalt:**
-- **Küsten:** Helgoland (Nordsee), Rostock (Ostsee), Husum (Nordfriesland)
-- **Mittelgebirge:** Harz, Schwäbische Alb, Pforzheim (Nordschwarzwald)
-- **Alpenvorland:** Kempten, Alpenvorland
-- **Tiefland:** Münster, Köln, Mannheim, Ludwigshafen
-
-**Windenergetische Relevanz:**
-- **High-Potential:** Helgoland, Husum, Rostock (maritime Bedingungen)
-- **Medium-Potential:** Harz, Schwäbische Alb (Mittelgebirge)
-- **Reference-Potential:** Köln, Mannheim, Ludwigshafen (Binnenland-Referenz)
-
-**Analytischer Mehrwert:**
-- Windrosen-Vergleiche zwischen verschiedenen Topografien
-- Hellmann-Exponenten-Analysen über verschiedene Geländeformen
-- Weibull-Parameter-Vergleiche für Windpotential-Klassifizierung
-- Saisonalitäts-Analysen (Nord-Süd-Vergleiche)
-
-### Grid-Metadaten & Methodische Sauberkeit
-
-Das Projekt berücksichtigt methodisch kritische Aspekte meteorologischer Modelldaten:
-
-- **Grid-Point Discrepancy**: Open-Meteo liefert Daten auf mathematischen Gittern (ERA5: 0.25° ≈ 25km, ERA5-Land: 0.1° ≈ 11km, ECMWF IFS: 9km)
-- **Elevation-Correction**: Die API führt automatische Elevation-Correction basierend auf umliegenden Grid-Zellen durch
-- **Metadaten-Speicherung**: Alle Datensätze enthalten die tatsächlichen Grid-Koordinaten (`grid_latitude`, `grid_longitude`) und Grid-Elevation (`grid_elevation`)
-- **Analytische Transparenz**: Ermöglicht methodisch saubere Analysen der Unterschiede zwischen angeforderten Koordinaten und tatsächlichen Grid-Punkten
-- **Standard-Verhalten**: Nutzung von Open-Meteo Standard mit automatischer Elevation-Correction für optimale Topografie-Annäherung
-
-### Grid-Metadaten Validierung
-
-Nach dem Datenimport können Sie die Grid-Metadaten analysieren:
-
-```sql
--- Elevation-Differenzen pro Standort
-SELECT
-    location_name,
-    AVG(grid_elevation) as avg_grid_elevation,
-    MIN(grid_elevation) as min_grid_elevation,
-    MAX(grid_elevation) as max_grid_elevation,
-    COUNT(*) as sample_count
-FROM wind_logs
-GROUP BY location_name;
-
--- Grid-Koordinaten-Abweichungen
-SELECT
-    location_name,
-    AVG(ABS(grid_latitude - latitude)) as avg_lat_diff,
-    AVG(ABS(grid_longitude - longitude)) as avg_lon_diff
-FROM wind_logs
-GROUP BY location_name;
-```
-
-### Statistische Analyse & Visualisierung
-
-Analyse der geladenen Winddaten mit statistischen Methoden und Visualisierungen:
+### 5. Daten abrufen
 
 ```bash
-# Analyser starten (analysiert Daten für alle Standorte in config.yaml)
+go run cmd/fetcher/main.go -config config.yaml
+```
+
+### 6. Analyse starten
+
+```bash
 go run cmd/analyser/main.go
 ```
 
-Der Analyser erstellt folgende Ausgaben im `./output` Verzeichnis:
+Die erzeugten Ausgaben werden unter folgendem Pfad gespeichert:
 
-- **Hellmann-Exponenten**: Timeline-Diagramme der Windprofil-Parameter
-- **Validierungsmetriken**: Tabellen und Charts für Power-Law Modellvalidierung
-- **Weibull-Analyse**: PDF/CDF Charts, Histogramme und Fit-Güte-Metriken
-- **Standortvergleich**: Heatmaps und Vergleichs-Charts zwischen verschiedenen Standorten
+```text
+./output
+```
 
-## 🎓 Lernziele
+---
 
-- **Concurrency Patterns**: Fan-Out/Fan-In Pipeline mit Worker-Pools
-- **API-Integration**: Rate-Limiting, Retry-Logik, Fallback-Strategien
-- **Datenbank-Design**: TimescaleDB Hypertables für effiziente Zeitreihen
-- **Numerische Verfahren**: Power-Law Interpolation für Windprofile, MLE-Parameterschätzung
-- **Statistische Analyse**: Verteilungsanalyse, Parameterschätzung, Goodness-of-Fit Tests
-- **Interface-Based Design**: Generische Interfaces für erweiterbare Architektur
-- **Strategy Pattern**: Austauschbare Algorithmen und Implementierungen
-- **Software-Architektur**: Layered Architecture, Dependency Injection, Code-Refactoring
-- **Separation of Concerns**: Modularisierung und Entkopplung von Komponenten
-- **Grid-Metadaten-Handling**: Methodisch saubere Berücksichtigung meteorologischer Modell-Gitter
-- **UPSERT-Optimierung**: Kombination aus CopyFrom-Geschwindigkeit und Konsistenz
+## 🔍 Datenbank untersuchen
 
-## 🛠️ Tech Stack
+Gitter-Metadaten können direkt in PostgreSQL untersucht werden.
 
-- **Go 1.25+**: Hauptprogrammiersprache
-- **PostgreSQL + TimescaleDB**: Zeitreihen-Datenbank
-- **Open-Meteo API**: Wetterdatenquelle (Archive, Historical Forecast, Forecast)
-- **pgx/v5**: PostgreSQL Treiber
-- **gonum/stat**: Statistische Funktionen (Korrelation, Quantile, etc.)
-- **gonum/mathext**: Spezielle mathematische Funktionen (Gamma, Digamma, etc.)
-- **go-echarts**: Interaktive Chart-Bibliothek
-- **gopkg.in/yaml.v3**: YAML-Konfiguration
-- **Interface-Based Design**: Generische Verteilungsarchitektur
+Beispiel:
 
-## 🛣️ Roadmap
+```sql
+SELECT
+    location_name,
+    AVG(grid_elevation) AS avg_grid_elevation,
+    MIN(grid_elevation) AS min_grid_elevation,
+    MAX(grid_elevation) AS max_grid_elevation,
+    COUNT(*) AS sample_count
+FROM wind_logs
+GROUP BY location_name;
+```
 
-### ✅ Phase 1: Dateninfrastruktur (Abgeschlossen)
-- Open-Meteo API Integration mit Rate-Limiting
-- Concurrency Pipeline für parallele Datenabfrage
-- PostgreSQL/TimescaleDB Schema
-- Power-Law Interpolation
-- Grid-Metadaten-Integration (grid_latitude, grid_longitude, grid_elevation)
-- UPSERT-Logik mit Staging-Tabelle und Deduplizierung
-- UNIQUE Constraints für Datensatz-Konsistenz
+Unterschiede zwischen angeforderter und tatsächlich verwendeter Gitterposition können beispielsweise so analysiert werden:
 
-### ✅ Phase 2: Statistische Analyse (Abgeschlossen)
-- Weibull-Parameterschätzung (MLE mit Location-Parameter)
-- Goodness-of-Fit Tests (KS-Test, AIC, BIC, RMSE)
-- Deskriptive Statistik & Korrelation (Pearson, Spearman, Kendall)
-- Power-Law Modellvalidierung
+```sql
+SELECT
+    location_name,
+    AVG(ABS(grid_latitude - latitude)) AS avg_lat_diff,
+    AVG(ABS(grid_longitude - longitude)) AS avg_lon_diff
+FROM wind_logs
+GROUP BY location_name;
+```
 
-### ✅ Phase 3: Visualisierung (Abgeschlossen)
-- Weibull-PDF/CDF Plots
-- Histogramme & Vergleichs-Charts
-- Heatmaps für Standortvergleiche
-- Interaktive HTML-Dashboards
+---
 
-### ✅ Phase 4: Architektur-Refactoring (Abgeschlossen)
-- Interface-basierte Verteilungsarchitektur (`ContinuousDistribution`, `Fitter`)
-- Generische Datenbereinigung und Statistik-Funktionen
-- Automatische Modellauswahl (`SelectBestModel`)
-- Generische Visualisierungskomponenten
-- Unterstützung mehrerer Verteilungen (Weibull, Gamma, Log-Normal)
+## 🔄 Entwicklung der Architektur
 
-### 📋 Phase 5: Erweiterte Verteilungen (Geplant)
-- Rayleigh-Verteilung (Sonderfall von Weibull)
-- Normalverteilung (als Referenz)
-- Log-Logistic-Verteilung
-- Generalized Extreme Value (GEV) für Extremwertanalyse
+Die statistische Analyse wurde ursprünglich stark auf die Weibull-Verteilung zugeschnitten.
 
-### 📋 Phase 6: Windenergie-Berechnungen (Geplant)
-- Windenergie-Potenzialberechnung
-- Capacity Factor Analyse
-- Power Curve Integration
+Anschließend wurde die Architektur schrittweise in Richtung generischer Komponenten refaktoriert:
 
-## ⚠️ Limitierungen & Disclaimer
+```text
+Weibull-spezifische Analyse
+          ↓
+Gemeinsame Interfaces
+          ↓
+Generische Verteilungsschicht
+          ↓
+Mehrere Fitting-Implementierungen
+          ↓
+Automatische Modellauswahl
+```
 
-- **API-Abhängigkeit**: Abhängig von Open-Meteo API Verfügbarkeit und Limits
-- **Datenqualität**: Abhängig von Wetterdaten und Modellqualität
-- **Grid-Point Discrepancy**: Meteorologische Modelldaten basieren auf Gittern (9-25km Auflösung), nicht exakten Standortkoordinaten
-- **Elevation-Differenzen**: Grid-Elevation kann von tatsächlicher Standort-Elevation abweichen (besonders in bergigen Regionen)
-- **Modell-Simplifikationen**: Realer Wind ist komplexer als statistische Verteilungen
-- **Automatische Modellauswahl**: Basiert auf AIC, aber keine Garantie für das "wahre" Modell
-- **Kein professionelles Tool**: Nicht für Investitionsentscheidungen geeignet
+Die bestehende Weibull-Funktionalität bleibt dabei erhalten, während weitere Verteilungen über dieselbe Architektur integriert werden können.
 
-## 📄 Lizenz
+Das Refactoring erfolgt bewusst schrittweise und nicht als vollständiger Rewrite.
 
-Dieses Projekt dient Lernzwecken und kann frei verwendet und modifiziert werden.
+---
+
+## 📚 Technische Entscheidungen
+
+Einige Entscheidungen sind für die Architektur besonders wichtig:
+
+### Interfaces statt fest verdrahteter Verteilungslogik
+
+Das Verhalten statistischer Verteilungen wird über Interfaces beschrieben. Dadurch hängt die Analysepipeline nicht von einem einzigen Modell ab.
+
+### Kontrollierte Nebenläufigkeit statt unbegrenzter Parallelität
+
+Mehrere Worker erhöhen den Durchsatz, werden aber mit konfigurierbarem Rate-Limiting kombiniert, um externe API-Grenzen einzuhalten.
+
+### Bulk Writes statt Einzel-Inserts
+
+Größere historische Datensätze werden in Batches verarbeitet, um den Overhead einzelner Datenbankoperationen zu reduzieren.
+
+### Mehrere Validierungsmetriken statt einer einzigen Annahme
+
+Verschiedene statistische Kennzahlen ermöglichen einen nachvollziehbareren Modellvergleich.
+
+### Sichtbare Metadaten statt versteckter Approximationen
+
+Tatsächliche Gitterkoordinaten und Höhen werden gespeichert, damit Annahmen und mögliche Abweichungen später überprüfbar bleiben.
+
+---
+
+## 🚧 Aktueller Stand
+
+### Abgeschlossen
+
+* Open-Meteo-Integration
+* Rate-limited Concurrent Ingestion
+* PostgreSQL / TimescaleDB
+* Batch-Verarbeitung
+* Staging-Tabellen mit UPSERT
+* Deduplizierung und Unique Constraints
+* Windprofil-Interpolation
+* Statistische Analyse
+* Weibull-Fitting
+* Gamma-Fitting
+* Lognormal-Fitting
+* Goodness-of-Fit-Bewertung
+* Automatische Modellauswahl
+* Interaktive Visualisierung
+* Generische Verteilungsarchitektur
+
+### Geplant
+
+* Weitere Wahrscheinlichkeitsverteilungen
+* Extremwertanalyse
+* Berechnungen zur Windenergienutzung
+* Kapazitätsfaktor-Analyse
+* Weitere statistische Vergleichsmethoden
+* Erweiterte Windvisualisierungen
+* Weitere Überführung älterer Weibull-spezifischer Logik in die generische Architektur
+
+---
+
+## ⚠️ Grenzen des Projekts
+
+Das Projekt ist als Engineering- und Statistikprojekt gedacht und nicht als professionelles Planungssystem.
+
+Wichtige Einschränkungen:
+
+* Ergebnisse hängen von Qualität und Verfügbarkeit der zugrunde liegenden Wetterdaten ab
+* meteorologische Modelldaten repräsentieren Gitterzellen und nicht exakte Messpunkte
+* die Gitterhöhe kann von der tatsächlichen Geländehöhe abweichen
+* Power-Law-Interpolation ist eine vereinfachte Beschreibung der realen atmosphärischen Bedingungen
+* kein statistisches Modell garantiert eine perfekte Beschreibung der Realität
+* API-Verfügbarkeit und Rate-Limits begrenzen die Datenerfassung
+
+Die Ergebnisse sollten daher nicht unmittelbar für Investitionsentscheidungen oder professionelle Windenergieplanung verwendet werden.
+
+---
+
+## 📌 Fokus des Projekts
+
+Der Schwerpunkt von `wind_analysis` liegt darauf, zu untersuchen, wie sich ein komplexeres Datenverarbeitungsproblem in Go strukturieren lässt und dabei:
+
+* Nebenläufigkeit explizit bleibt
+* Datenzugriff gekapselt ist
+* statistische Algorithmen erweiterbar bleiben
+* Performance messbar wird
+* Annahmen sichtbar bleiben
+* zukünftige Erweiterungen möglich sind
+
+Das Projekt ist bewusst mehr als ein einfacher API-Client: Es verbindet Datenerfassung, Persistenz, numerische Verarbeitung, statistische Modellierung und Visualisierung in einer durchgängigen Pipeline.

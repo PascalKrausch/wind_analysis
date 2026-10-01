@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"wind_analysis/internal/analysis/interpolation"
+	"wind_analysis/internal/analysis/statistics"
 	"wind_analysis/models"
 )
 
@@ -14,15 +15,15 @@ import (
 // für das Master-Dashboard.
 type MasterDashboardData struct {
 	// Metadaten
-	Locations      []string
-	StartTime      time.Time
-	EndTime        time.Time
+	Locations []string
+	StartTime time.Time
+	EndTime   time.Time
 
 	// Windgeschwindigkeits-Daten (zeitliche Verläufe)
-	WindSpeedData  map[string][]TimeSeriesPoint // key: locationName
+	WindSpeedData map[string][]TimeSeriesPoint // key: locationName
 
 	// Hellmann-Exponenten (zeitliche Verläufe)
-	HellmannData   map[string][]TimeSeriesPoint // key: locationName
+	HellmannData map[string][]TimeSeriesPoint // key: locationName
 
 	// Verteilungs-Daten (für verschiedene Höhen und Modelle)
 	DistributionData map[string][]DistributionPlotInput // key: locationName
@@ -57,31 +58,31 @@ func (m *MasterDashboardData) AddLocation(locationName string) {
 // AddWindSpeedData fügt Windgeschwindigkeits-Daten für einen Standort hinzu
 func (m *MasterDashboardData) AddWindSpeedData(locationName string, points []TimeSeriesPoint) {
 	m.AddLocation(locationName)
-	m.WindSpeedData[locationName] = points
+	m.WindSpeedData[locationName] = append([]TimeSeriesPoint(nil), points...)
 }
 
 // AddHellmannData fügt Hellmann-Exponenten-Daten für einen Standort hinzu
 func (m *MasterDashboardData) AddHellmannData(locationName string, points []TimeSeriesPoint) {
 	m.AddLocation(locationName)
-	m.HellmannData[locationName] = points
+	m.HellmannData[locationName] = append([]TimeSeriesPoint(nil), points...)
 }
 
 // AddDistributionData fügt Verteilungs-Daten für einen Standort hinzu
 func (m *MasterDashboardData) AddDistributionData(locationName string, inputs []DistributionPlotInput) {
 	m.AddLocation(locationName)
-	m.DistributionData[locationName] = inputs
+	m.DistributionData[locationName] = cloneDistributionInputs(inputs)
 }
 
 // AddValidationData fügt Validierungs-Metriken für einen Standort hinzu
 func (m *MasterDashboardData) AddValidationData(locationName string, rows []MetricRow) {
 	m.AddLocation(locationName)
-	m.ValidationData[locationName] = rows
+	m.ValidationData[locationName] = append([]MetricRow(nil), rows...)
 }
 
 // AddErrorShapeData fügt Error-Shape-Daten für einen Standort hinzu
 func (m *MasterDashboardData) AddErrorShapeData(locationName string, heightMap map[float64]interpolation.ValidationResult) {
 	m.AddLocation(locationName)
-	m.ErrorShapeData[locationName] = heightMap
+	m.ErrorShapeData[locationName] = cloneValidationResults(heightMap)
 }
 
 // SetTimeRange setzt den globalen Zeitbereich für das Dashboard
@@ -92,7 +93,7 @@ func (m *MasterDashboardData) SetTimeRange(start, end time.Time) {
 
 // GetLocationsForChart gibt die sortierten Standortnamen zurück
 func (m *MasterDashboardData) GetLocationsForChart() []string {
-	return m.Locations
+	return append([]string(nil), m.Locations...)
 }
 
 // HasWindSpeedData prüft ob Windgeschwindigkeits-Daten für einen Standort vorhanden sind
@@ -131,7 +132,7 @@ func (m *MasterDashboardData) GetWindSpeedTimeSeries(locationName string) Locati
 	if !ok {
 		return LocationTimeSeries{LocationName: locationName, Points: []TimeSeriesPoint{}}
 	}
-	return LocationTimeSeries{LocationName: locationName, Points: points}
+	return LocationTimeSeries{LocationName: locationName, Points: append([]TimeSeriesPoint(nil), points...)}
 }
 
 // GetHellmannTimeSeries konvertiert Hellmann-Daten in LocationTimeSeries Format
@@ -140,7 +141,7 @@ func (m *MasterDashboardData) GetHellmannTimeSeries(locationName string) Locatio
 	if !ok {
 		return LocationTimeSeries{LocationName: locationName, Points: []TimeSeriesPoint{}}
 	}
-	return LocationTimeSeries{LocationName: locationName, Points: points}
+	return LocationTimeSeries{LocationName: locationName, Points: append([]TimeSeriesPoint(nil), points...)}
 }
 
 // GetDistributionInputs gibt die Verteilungs-Inputs für einen Standort zurück
@@ -149,7 +150,7 @@ func (m *MasterDashboardData) GetDistributionInputs(locationName string) []Distr
 	if !ok {
 		return []DistributionPlotInput{}
 	}
-	return inputs
+	return cloneDistributionInputs(inputs)
 }
 
 // GetValidationRows gibt die Validierungs-Metriken für einen Standort zurück
@@ -158,7 +159,7 @@ func (m *MasterDashboardData) GetValidationRows(locationName string) []MetricRow
 	if !ok {
 		return []MetricRow{}
 	}
-	return rows
+	return append([]MetricRow(nil), rows...)
 }
 
 // GetErrorShapeData gibt die Error-Shape-Daten für einen Standort zurück
@@ -167,7 +168,7 @@ func (m *MasterDashboardData) GetErrorShapeData(locationName string) map[float64
 	if !ok {
 		return map[float64]interpolation.ValidationResult{}
 	}
-	return data
+	return cloneValidationResults(data)
 }
 
 // GetAllWindSpeedTimeSeries gibt alle Windgeschwindigkeits-Zeitreihen zurück
@@ -208,7 +209,7 @@ func (m *MasterDashboardData) GetAllDistributionInputs() []DistributionPlotInput
 	result := make([]DistributionPlotInput, 0)
 	for _, loc := range m.Locations {
 		if m.HasDistributionData(loc) {
-			result = append(result, m.DistributionData[loc]...)
+			result = append(result, cloneDistributionInputs(m.DistributionData[loc])...)
 		}
 	}
 	return result
@@ -252,7 +253,7 @@ func MapLocationToMasterDashboard(
 	// Validierungs-Daten mappen
 	if validationByLocation != nil {
 		if heightMap, ok := validationByLocation[location.Name]; ok {
-			rows := mapValidationToMetricRows(validationByLocation)
+			rows := mapValidationToMetricRows(location.Name, heightMap)
 			master.AddValidationData(location.Name, rows)
 			master.AddErrorShapeData(location.Name, heightMap)
 		}
@@ -264,15 +265,8 @@ func MapLocationToMasterDashboard(
 	}
 
 	// Zeitbereich aus den Daten ableiten
-	if len(records) > 0 {
-		times := make([]time.Time, 0, len(records))
-		for _, r := range records {
-			times = append(times, r.Time)
-		}
-		if len(times) > 0 {
-			sort.Slice(times, func(i, j int) bool { return times[i].Before(times[j]) })
-			master.SetTimeRange(times[0], times[len(times)-1])
-		}
+	if start, end, ok := recordTimeRange(records); ok {
+		master.SetTimeRange(start, end)
 	}
 
 	return master, nil
@@ -292,17 +286,24 @@ func MapMultipleLocationsToMasterDashboard(
 	var allTimes []time.Time
 
 	for _, location := range locations {
+		master.AddLocation(location.Name)
+
 		records, hasRecords := recordsMap[location.Name]
 		exponents, hasExponents := exponentsMap[location.Name]
 		distributionInputs, hasDistribution := distributionInputsMap[location.Name]
+
+		if hasRecords {
+			for _, record := range records {
+				if !record.Time.IsZero() {
+					allTimes = append(allTimes, record.Time)
+				}
+			}
+		}
 
 		// Windgeschwindigkeits-Daten
 		if hasRecords && len(records) > 0 {
 			if windTS, err := buildWindSpeedTimeSeriesForLocation(location.Name, records); err == nil {
 				master.AddWindSpeedData(location.Name, windTS.Points)
-				for _, r := range records {
-					allTimes = append(allTimes, r.Time)
-				}
 			}
 		}
 
@@ -315,7 +316,7 @@ func MapMultipleLocationsToMasterDashboard(
 		// Validierungs-Daten
 		if validationByLocation != nil {
 			if heightMap, ok := validationByLocation[location.Name]; ok {
-				rows := mapValidationToMetricRows(validationByLocation)
+				rows := mapValidationToMetricRows(location.Name, heightMap)
 				master.AddValidationData(location.Name, rows)
 				master.AddErrorShapeData(location.Name, heightMap)
 			}
@@ -367,23 +368,24 @@ func buildWindSpeedTimeSeriesForLocation(locName string, records []models.WindRe
 // extractRecordTimeAndSpeed extrahiert Zeit und Windgeschwindigkeit aus einem WindRecord
 func extractRecordTimeAndSpeed(record models.WindRecord) (time.Time, float64, bool) {
 	t := record.Time
-	
+
 	// Versuche verschiedene Windgeschwindigkeits-Felder zu finden
 	// Priorität: 10m, dann 80m, dann 100m
 	v := 0.0
 	ok := false
-	
-	if record.WindData.WindSpeed_10m != nil {
-		v = *record.WindData.WindSpeed_10m
-		ok = true
-	} else if record.WindData.WindSpeed_80m != nil {
-		v = *record.WindData.WindSpeed_80m
-		ok = true
-	} else if record.WindData.WindSpeed_100m != nil {
-		v = *record.WindData.WindSpeed_100m
-		ok = true
+
+	for _, candidate := range []*float64{
+		record.WindData.WindSpeed_10m,
+		record.WindData.WindSpeed_80m,
+		record.WindData.WindSpeed_100m,
+	} {
+		if candidate != nil && !math.IsNaN(*candidate) && !math.IsInf(*candidate, 0) && *candidate >= 0 {
+			v = *candidate
+			ok = true
+			break
+		}
 	}
-	
+
 	return t, v, ok
 }
 
@@ -395,6 +397,9 @@ func mapExponentsToTimeSeries(locName string, exponents []interpolation.Hellmann
 
 	pts := make([]TimeSeriesPoint, 0, len(sorted))
 	for _, exp := range sorted {
+		if exp.Time.IsZero() || math.IsNaN(exp.Alpha) || math.IsInf(exp.Alpha, 0) {
+			continue
+		}
 		pts = append(pts, TimeSeriesPoint{
 			Time:  exp.Time,
 			Value: exp.Alpha,
@@ -408,19 +413,80 @@ func mapExponentsToTimeSeries(locName string, exponents []interpolation.Hellmann
 
 // mapValidationToMetricRows konvertiert Validierungs-Daten in MetricRows
 // (diese Funktion existiert bereits im processor.go, wird hier für Konsistenz neu definiert)
-func mapValidationToMetricRows(validation map[string]map[float64]interpolation.ValidationResult) []MetricRow {
-	var rows []MetricRow
-	for loc, heightMap := range validation {
-		for h, res := range heightMap {
-			rows = append(rows, MetricRow{
-				Location:    loc,
-				HeightM:     h,
-				MAE:         res.MAE,
-				RMSE:        res.RMSE,
-				Correlation: res.Correlation,
-				SampleCount: res.SampleCount,
-			})
-		}
+func mapValidationToMetricRows(location string, heightMap map[float64]interpolation.ValidationResult) []MetricRow {
+	heights := make([]float64, 0, len(heightMap))
+	for height := range heightMap {
+		heights = append(heights, height)
+	}
+	sort.Float64s(heights)
+
+	rows := make([]MetricRow, 0, len(heights))
+	for _, h := range heights {
+		res := heightMap[h]
+		rows = append(rows, MetricRow{
+			Location:    location,
+			HeightM:     h,
+			MAE:         res.MAE,
+			RMSE:        res.RMSE,
+			Correlation: res.Correlation,
+			SampleCount: res.SampleCount,
+		})
 	}
 	return rows
+}
+
+func recordTimeRange(records []models.WindRecord) (time.Time, time.Time, bool) {
+	var start, end time.Time
+	for _, record := range records {
+		if record.Time.IsZero() {
+			continue
+		}
+		if start.IsZero() || record.Time.Before(start) {
+			start = record.Time
+		}
+		if end.IsZero() || record.Time.After(end) {
+			end = record.Time
+		}
+	}
+	return start, end, !start.IsZero()
+}
+
+func cloneDistributionInputs(inputs []DistributionPlotInput) []DistributionPlotInput {
+	cloned := append([]DistributionPlotInput(nil), inputs...)
+	for i := range cloned {
+		cloned[i].Histogram = append([]statistics.Bin(nil), inputs[i].Histogram...)
+		cloned[i].EmpiricalCDF = append([]statistics.CDFPoint(nil), inputs[i].EmpiricalCDF...)
+		cloned[i].FittedPDF = append([]statistics.DensityPoint(nil), inputs[i].FittedPDF...)
+		cloned[i].FittedCDF = append([]statistics.CDFPoint(nil), inputs[i].FittedCDF...)
+	}
+	return cloned
+}
+
+func cloneValidationResults(results map[float64]interpolation.ValidationResult) map[float64]interpolation.ValidationResult {
+	cloned := make(map[float64]interpolation.ValidationResult, len(results))
+	for height, result := range results {
+		result.PredictedSummary = cloneDescriptiveStats(result.PredictedSummary)
+		result.ActualSummary = cloneDescriptiveStats(result.ActualSummary)
+		result.ErrorSummary = cloneDescriptiveStats(result.ErrorSummary)
+		cloned[height] = result
+	}
+	return cloned
+}
+
+func cloneDescriptiveStats(stats interpolation.DescriptiveStats) interpolation.DescriptiveStats {
+	if stats.Quantiles != nil {
+		quantiles := make(map[float64]float64, len(stats.Quantiles))
+		for key, value := range stats.Quantiles {
+			quantiles[key] = value
+		}
+		stats.Quantiles = quantiles
+	}
+	if stats.Percentil != nil {
+		percentiles := make(map[float64]float64, len(stats.Percentil))
+		for key, value := range stats.Percentil {
+			percentiles[key] = value
+		}
+		stats.Percentil = percentiles
+	}
+	return stats
 }
