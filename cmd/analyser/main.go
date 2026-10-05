@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"flag"
 	"fmt"
 	"log"
 	"os"
@@ -12,10 +13,17 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"wind_analysis/internal/analysis/validation"
+	"wind_analysis/internal/server"
 	"wind_analysis/models"
 )
 
 func main() {
+	// Prüfe ob serve Subcommand aufgerufen wird
+	if len(os.Args) > 1 && os.Args[1] == "serve" {
+		runServer()
+		return
+	}
+
 	// 1. Graceful Shutdown einrichten
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -87,4 +95,24 @@ func loadConfig(configPath string) (*models.Config, error) {
 	}
 
 	return &config, nil
+}
+
+func runServer() {
+	// Flags parsen
+	port := flag.String("port", "8080", "Port für den Server")
+	flag.Parse()
+
+	// Datenbank initialisieren
+	ctx := context.Background()
+	db, err := setupDatabase(ctx)
+	if err != nil {
+		log.Fatalf("Datenbank-Setup fehlgeschlagen: %v", err)
+	}
+	defer db.Close()
+
+	// Server starten
+	log.Printf("🚀 Starte Server auf http://localhost:%s", *port)
+	if err := server.Start(db, *port); err != nil {
+		log.Fatalf("Server-Fehler: %v", err)
+	}
 }

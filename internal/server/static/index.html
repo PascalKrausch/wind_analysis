@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Windanalyse Dashboard</title>
+    <link rel="stylesheet" href="styles.css">
+    <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
+</head>
+<body>
+    <div class="dashboard">
+        <h1>Windanalyse – Interaktives Dashboard</h1>
+
+        <section class="filters">
+            <div class="filter-group">
+                <label for="locations">Standorte:</label>
+                <select id="locations" multiple></select>
+                <p class="hint">Strg+Klick (oder Cmd+Klick auf Mac) für Mehrfachauswahl</p>
+            </div>
+
+            <div class="filter-group">
+                <label for="date-start">Von:</label>
+                <input type="date" id="date-start">
+            </div>
+
+            <div class="filter-group">
+                <label for="date-end">Bis:</label>
+                <input type="date" id="date-end">
+            </div>
+
+            <button id="load-btn">Daten laden</button>
+        </section>
+
+        <section class="chart-section">
+            <h2>Windgeschwindigkeit</h2>
+            <div id="wind-chart"></div>
+        </section>
+
+        <section class="chart-section">
+            <h2>Hellmann-Exponent</h2>
+            <div id="hellmann-chart"></div>
+        </section>
+
+        <section class="chart-section">
+            <h2>Validierungsmetriken</h2>
+            <div id="validation-table"></div>
+        </section>
+    </div>
+
+    <script src="dashboard.js"></script>
+</body>
+</html>

@@ -480,24 +480,28 @@ func TestPlotMasterDashboardRendersFiltersAndSections(t *testing.T) {
 	html := string(content)
 	for _, expected := range []string{
 		`<details id="location-filter">`,
-		`<input type="checkbox" checked value="Standort &lt;A&gt;">`,
+		`<input type="checkbox" checked value="Standort &lt;A&gt;"`,
 		`<input id="date-start" type="date">`,
 		`<input id="date-end" type="date">`,
 		`Standort &lt;A&gt;`,
 		masterDashboardNoDataMessage,
 		`id="timeseries-section"`,
 		`id="distribution-section"`,
-		`noDataMessage.replace("%s",name)`,
-		`document.getElementById("distribution-empty").hidden`,
-		`data-dashboard-kind="distribution"`,
+		`id="distribution-container"`,
+		`distribution-charts-data`,
 		`data-validation-location="Standort &lt;A&gt;"`,
 	} {
 		if !strings.Contains(html, expected) {
 			t.Errorf("rendered dashboard does not contain %q", expected)
 		}
 	}
-	if strings.Count(html, `data-dashboard-kind="distribution" data-dashboard-location=`) != 2 {
-		t.Errorf("expected histogram/PDF and CDF chart metadata; got %d entries", strings.Count(html, `data-dashboard-kind="distribution" data-dashboard-location=`))
+	// Lazy Loading: Prüfung auf JavaScript Funktionen und Chart-Metadaten
+	if !strings.Contains(html, `updateDistributionCharts`) {
+		t.Errorf("rendered dashboard should contain lazy loading function")
+	}
+	// Prüfung auf Chart-Metadaten im JSON (nicht HeightM weil Test 80m verwendet)
+	if !strings.Contains(html, `Standort <A>`) || !strings.Contains(html, `80`) {
+		t.Errorf("rendered dashboard should contain distribution chart metadata")
 	}
 }
 

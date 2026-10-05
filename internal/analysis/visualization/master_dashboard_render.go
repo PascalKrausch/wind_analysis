@@ -17,8 +17,15 @@ import (
 const masterDashboardNoDataMessage = "Für %s kann keine Windgeschwindigkeit oder Hellmann Exponent geladen oder dargestellt werden"
 
 type masterDashboardTimelinePayload struct {
-	Wind     map[string][]masterDashboardTimelinePoint `json:"wind"`
-	Hellmann map[string][]masterDashboardTimelinePoint `json:"hellmann"`
+	Wind          map[string][]masterDashboardTimelinePoint `json:"wind"`
+	Hellmann      map[string][]masterDashboardTimelinePoint `json:"hellmann"`
+	Distributions map[string][]masterDashboardDistributionData `json:"distributions"`
+}
+
+type masterDashboardDistributionData struct {
+	Location string `json:"location"`
+	HeightM  int    `json:"heightM"`
+	Series   string `json:"series"`
 }
 
 type masterDashboardTimelinePoint struct {
@@ -29,6 +36,8 @@ type masterDashboardTimelinePoint struct {
 type masterDashboardDistributionChart struct {
 	chart    components.Charter
 	location string
+	height   int
+	series   string
 }
 
 // PlotMasterDashboard rendert Zeitreihen, Validierungsmetriken und Verteilungs-Fits
@@ -51,15 +60,15 @@ func PlotMasterDashboard(master *MasterDashboardData, outputPath string) error {
 	hellmannChart := buildMasterDashboardTimelineChart(master, "Hellmann-Exponent über Zeit", "Hellmann-Exponent α")
 	page.AddCharts(windChart, hellmannChart)
 
-	distributionCharts := make([]masterDashboardDistributionChart, 0, len(master.GetAllDistributionInputs())*2)
-	for _, input := range master.GetAllDistributionInputs() {
+	// Verteilungs-Charts lazy loading: Nur erstellen, aber nicht sofort zur Page hinzufügen
+	// Sie werden erst später bei Bedarf gerendert
+	distributionInputs := master.GetAllDistributionInputs()
+	distributionCharts := make([]masterDashboardDistributionChart, 0, len(distributionInputs)*2)
+	for _, input := range distributionInputs {
 		distributionCharts = append(distributionCharts,
-			masterDashboardDistributionChart{chart: BuildDistributionHistogramPDFChart(input), location: input.LocationName},
-			masterDashboardDistributionChart{chart: BuildDistributionCDFChart(input), location: input.LocationName},
+			masterDashboardDistributionChart{chart: BuildDistributionHistogramPDFChart(input), location: input.LocationName, height: input.HeightM, series: input.SeriesName},
+			masterDashboardDistributionChart{chart: BuildDistributionCDFChart(input), location: input.LocationName, height: input.HeightM, series: input.SeriesName},
 		)
-	}
-	for _, item := range distributionCharts {
-		page.AddCharts(item.chart)
 	}
 
 	var rendered bytes.Buffer
@@ -75,9 +84,7 @@ func PlotMasterDashboard(master *MasterDashboardData, outputPath string) error {
 	content = addMasterDashboardSections(content, hellmannChart.ChartID, distributionCharts)
 	content = addDashboardChartMetadataByID(content, windChart.ChartID, "", "wind")
 	content = addDashboardChartMetadataByID(content, hellmannChart.ChartID, "", "hellmann")
-	for _, item := range distributionCharts {
-		content = addDashboardChartMetadata(content, item.chart, item.location, "distribution")
-	}
+	// Lazy Loading: Verteilungs-Charts werden später über JavaScript geladen
 	content = addMasterDashboardValidationTable(content, master)
 
 	if err := RenderHTMLToFile(content, outputPath); err != nil {
@@ -88,20 +95,49 @@ func PlotMasterDashboard(master *MasterDashboardData, outputPath string) error {
 
 func buildMasterDashboardTimelinePayload(master *MasterDashboardData) (masterDashboardTimelinePayload, error) {
 	payload := masterDashboardTimelinePayload{
-		Wind:     make(map[string][]masterDashboardTimelinePoint, len(master.Locations)),
-		Hellmann: make(map[string][]masterDashboardTimelinePoint, len(master.Locations)),
+		Wind:          make(map[string][]masterDashboardTimelinePoint, len(master.Locations)),
+		Hellmann:      make(map[string][]masterDashboardTimelinePoint, len(master.Locations)),
+		Distributions: make(map[string][]masterDashboardDistributionData, len(master.Locations)),
 	}
+
+	totalDays := master.EndTime.Sub(master.StartTime).Hours() / 24
+	locationCount := len(master.Locations)
+
+	// Aggressiveres Downsampling: Basis-Sampling basierend auf Zeitraum
+	sampleInterval := 1
+	if totalDays > 365 {
+		sampleInterval = 48 // Jeden 48. Punkt bei > 1 Jahr (war 24)
+	} else if totalDays > 90 {
+		sampleInterval = 24 // Jeden 24. Punkt bei > 3 Monaten (war 12)
+	} else if totalDays > 30 {
+		sampleInterval = 12 // Jeden 12. Punkt bei > 1 Monat (war 6)
+	}
+
+	// Zusätzliches Scaling basierend auf Standort-Anzahl
+	// Bei vielen Standorten müssen wir noch aggressiver sein
+	if locationCount > 10 {
+		sampleInterval = sampleInterval * 2
+	} else if locationCount > 5 {
+		sampleInterval = sampleInterval * 3 / 2 // = sampleInterval * 1.5
+	}
+
+	// Sampling-Intervall runden und minimum 1
+	sampleIntervalInt := int(sampleInterval)
+	if sampleIntervalInt < 1 {
+		sampleIntervalInt = 1
+	}
+
 	for _, location := range master.Locations {
-		for _, point := range master.WindSpeedData[location] {
-			if !point.Time.IsZero() && isFiniteNumber(point.Value) {
+		for i, point := range master.WindSpeedData[location] {
+			if !point.Time.IsZero() && isFiniteNumber(point.Value) && i%sampleIntervalInt == 0 {
 				payload.Wind[location] = append(payload.Wind[location], masterDashboardTimelinePoint{
 					Time:  point.Time.UTC().Format("2006-01-02T15:04:05.000000000Z"),
 					Value: point.Value,
 				})
 			}
 		}
-		for _, point := range master.HellmannData[location] {
-			if !point.Time.IsZero() && isFiniteNumber(point.Value) {
+		for i, point := range master.HellmannData[location] {
+			if !point.Time.IsZero() && isFiniteNumber(point.Value) && i%sampleIntervalInt == 0 {
 				payload.Hellmann[location] = append(payload.Hellmann[location], masterDashboardTimelinePoint{
 					Time:  point.Time.UTC().Format("2006-01-02T15:04:05.000000000Z"),
 					Value: point.Value,
@@ -113,6 +149,20 @@ func buildMasterDashboardTimelinePayload(master *MasterDashboardData) (masterDas
 		sort.Slice(payload.Wind[location], func(i, j int) bool { return payload.Wind[location][i].Time < payload.Wind[location][j].Time })
 		sort.Slice(payload.Hellmann[location], func(i, j int) bool { return payload.Hellmann[location][i].Time < payload.Hellmann[location][j].Time })
 	}
+
+	// Sammle Metadaten für Verteilungs-Charts (Lazy Loading)
+	for _, location := range master.Locations {
+		if inputs, ok := master.DistributionData[location]; ok {
+			for _, input := range inputs {
+				payload.Distributions[location] = append(payload.Distributions[location], masterDashboardDistributionData{
+					Location: input.LocationName,
+					HeightM:  input.HeightM,
+					Series:   input.SeriesName,
+				})
+			}
+		}
+	}
+
 	return payload, nil
 }
 
@@ -241,14 +291,41 @@ func addMasterDashboardValidationTable(content string, master *MasterDashboardDa
 }
 
 func addMasterDashboardSections(content, hellmannChartID string, distributions []masterDashboardDistributionChart) string {
-	distributionSection := `</section><section id="distribution-section"><h2>Verteilungs-Fits</h2><div id="distribution-empty" class="notice" hidden>Für die ausgewählten Standorte sind keine Verteilungs-Fits verfügbar.</div>`
+	distributionSection := `</section><section id="distribution-section"><h2>Verteilungs-Fits</h2><div id="distribution-empty" class="notice" hidden>Für die ausgewählten Standorte sind keine Verteilungs-Fits verfügbar.</div><div id="distribution-container"></div>`
 	content = insertAfterDashboardChart(content, hellmannChartID, distributionSection)
 
-	if len(distributions) == 0 {
-		return strings.Replace(content, `</body>`, `</section></main></body>`, 1)
+	// Lazy Loading: Chart-Daten in verstecktem Container speichern
+	if len(distributions) > 0 {
+		var chartData strings.Builder
+		chartData.WriteString(`<script id="distribution-charts-data" type="application/json">`)
+		chartData.WriteString(`[`)
+		for i, dist := range distributions {
+			if i > 0 {
+				chartData.WriteString(`,`)
+			}
+			chartData.WriteString(`{`)
+			chartData.WriteString(`"location":"` + html.EscapeString(dist.location) + `",`)
+			chartData.WriteString(`"height":` + fmt.Sprintf("%d", dist.height) + `,`)
+			chartData.WriteString(`"series":"` + html.EscapeString(dist.series) + `",`)
+			chartData.WriteString(`"chartType":"` + getChartType(dist.chart) + `",`)
+			chartData.WriteString(`"chartID":"` + chartID(dist.chart) + `"`)
+			chartData.WriteString(`}`)
+		}
+		chartData.WriteString(`]`)
+		chartData.WriteString(`</script>`)
+		content = strings.Replace(content, `</body>`, chartData.String()+`</body>`, 1)
 	}
-	lastChartID := chartID(distributions[len(distributions)-1].chart)
-	return insertAfterDashboardChart(content, lastChartID, `</section></main>`)
+
+	return strings.Replace(content, `</body>`, `</section></main></body>`, 1)
+}
+
+func getChartType(chart components.Charter) string {
+	switch chart.(type) {
+	case *charts.Bar:
+		return "histogram"
+	default:
+		return "cdf"
+	}
 }
 
 func insertAfterDashboardChart(content, id, markup string) string {
@@ -281,20 +358,94 @@ func masterDashboardFilterJS(windChartID, hellmannChartID string) string {
  const noDataMessage=%q;
  const chartFor=id=>echarts.getInstanceByDom(document.getElementById(id));
  const selected=()=>checkboxes.filter(o=>o.checked).map(o=>o.value);
+ const currentLevel={wind:"hourly",hellmann:"hourly"};
+ let timer=null;
+
+ function aggregateData(points,level){
+  if(!points||points.length===0)return[];
+  const buckets=new Map();
+  points.forEach(p=>{
+   const t=new Date(p.time);
+   let key;
+   if(level==="monthly")key=new Date(t.getFullYear(),t.getMonth(),1).toISOString();
+   else if(level==="weekly"){
+    const d=new Date(t);
+    const day=d.getDay();
+    const diff=d.getDate()-day+(day===0?-6:1);
+    key=new Date(d.setDate(diff)).toISOString().slice(0,10);
+   }else if(level==="daily")key=t.toISOString().slice(0,10);
+   else key=t.toISOString().slice(0,13);
+   if(!buckets.has(key))buckets.set(key,{sum:0,count:0});
+   const b=buckets.get(key);
+   b.sum+=p.value;
+   b.count++;
+  });
+  const result=[];
+  buckets.forEach((v,k)=>{
+   result.push({time:k,value:v.sum/v.count});
+  });
+  return result.sort((a,b)=>a.time.localeCompare(b.time));
+ }
+
+ function pickLevel(rangeDays){
+  if(rangeDays>730)return"monthly";
+  if(rangeDays>120)return"weekly";
+  if(rangeDays>21)return"daily";
+  return"hourly";
+ }
+
+ function updateLevel(chart,metric,dates,pointsByLocation,level){
+  const allX=[],series={};
+  locations.forEach(name=>{
+   series[name]=[];
+  });
+  dates.forEach(d=>{
+   allX.push(new Date(d).toLocaleString("de-DE"));
+   locations.forEach(name=>{
+    const points=pointsByLocation[name];
+    const agg=aggregateData(points,level);
+    const point=agg.find(p=>p.time===d);
+    series[name].push(point?point.value:null);
+   });
+  });
+  chart.setOption({xAxis:[{data:allX}],series:locations.map(name=>({name,data:series[name]}))},{notMerge:false});
+  currentLevel[metric]=level;
+ }
+
  function update(){
   const chosen=selected(), from=start.value, to=end.value;
   selector.querySelector("summary").textContent=chosen.length===locations.length?"Alle Standorte ("+locations.length+")":chosen.length?chosen.length+" Standorte ausgewählt":"Keine Standorte ausgewählt";
   for(const metric of ["wind","hellmann"]){
    const chart=chartFor(ids[metric]);
-   const pointsByLocation={}; locations.forEach(name=>pointsByLocation[name]=new Map((data[metric][name]||[]).map(point=>[point.time,point.value])));
+   const pointsByLocation={}; locations.forEach(name=>pointsByLocation[name]=data[metric][name]||[]);
    const dates=Array.from(new Set(chosen.flatMap(name=>(data[metric][name]||[]).map(point=>point.time)))).sort().filter(value=>(!from||value.slice(0,10)>=from)&&(!to||value.slice(0,10)<=to));
-   const valid=chosen.filter(name=>dates.some(value=>pointsByLocation[name].has(value)));
+   const valid=chosen.filter(name=>dates.some(value=>pointsByLocation[name].some(p=>p.time===value)));
    const error=document.getElementById(metric+"-error");
    const item=document.getElementById(ids[metric]).parentElement;
    if(chart){
-    chart.setOption({xAxis:[{data:dates.map(value=>new Date(value).toLocaleString("de-DE"))}],series:locations.map(name=>({name,data:dates.map(value=>pointsByLocation[name].get(value)??null)}))},{notMerge:false});
+    const t0=new Date(dates[0]),t1=new Date(dates[dates.length-1]);
+    const rangeDays=(t1-t0)/(86400000);
+    const level=pickLevel(rangeDays);
+    updateLevel(chart,metric,dates,pointsByLocation,level);
     const selectedLegend={}; chosen.forEach(name=>selectedLegend[name]=true); locations.filter(name=>!chosen.includes(name)).forEach(name=>selectedLegend[name]=false);
     chart.setOption({legend:{selected:selectedLegend}});
+    chart.off("datazoom");
+    chart.on("datazoom",function(){
+     if(timer)clearTimeout(timer);
+     timer=setTimeout(function(){
+      const opt=chart.getOption();
+      const x=opt.xAxis[0].data;
+      if(x.length<2)return;
+      const dz=opt.dataZoom[0];
+      const si=Math.max(0,Math.floor((dz.start||0)/100*(x.length-1)));
+      const ei=Math.min(x.length-1,Math.ceil((dz.end||100)/100*(x.length-1)));
+      const t0=Date.parse(x[si]),t1=Date.parse(x[ei]);
+      if(isNaN(t0)||isNaN(t1)||t1<=t0)return;
+      const rangeDays=(t1-t0)/(86400000);
+      const next=pickLevel(rangeDays);
+      if(next!==currentLevel[metric])updateLevel(chart,metric,dates,pointsByLocation,next);
+     },120);
+    });
    }
    item.style.display=valid.length?"":"none";
    const missing=chosen.filter(name=>!valid.includes(name));
@@ -302,12 +453,89 @@ func masterDashboardFilterJS(windChartID, hellmannChartID string) string {
    error.textContent=chosen.length?missing.map(name=>noDataMessage.replace("%%s",name)).join(" "):"Bitte mindestens einen Standort auswählen.";
   }
   document.querySelectorAll("[data-validation-location]").forEach(row=>row.hidden=!chosen.includes(row.dataset.validationLocation));
-  const fitCharts=Array.from(document.querySelectorAll('[data-dashboard-kind="distribution"]'));
-  fitCharts.forEach(item=>item.parentElement.style.display=chosen.includes(item.dataset.dashboardLocation)?"":"none");
-  document.getElementById("distribution-empty").hidden=chosen.some(name=>fitCharts.some(item=>item.dataset.dashboardLocation===name));
+  updateDistributionCharts(chosen);
  }
  selector.addEventListener("change",update);start.addEventListener("change",update);end.addEventListener("change",update);
  update();
+
+ // Lazy Loading für Verteilungs-Charts
+ function updateDistributionCharts(chosen){
+  const container=document.getElementById("distribution-container");
+  const emptyMsg=document.getElementById("distribution-empty");
+  if(!container)return;
+
+  // Container leeren
+  container.innerHTML="";
+
+  // Chart-Daten abrufen
+  const chartDataScript=document.getElementById("distribution-charts-data");
+  if(!chartDataScript){
+   emptyMsg.hidden=false;
+   return;
+  }
+
+  try{
+   const chartsData=JSON.parse(chartDataScript.textContent);
+   const filteredCharts=chartsData.filter(chart=>chosen.includes(chart.location));
+
+   if(filteredCharts.length===0){
+    emptyMsg.hidden=false;
+    return;
+   }
+
+   emptyMsg.hidden=true;
+
+   // Nur Charts für ausgewählte Standorte rendern
+   filteredCharts.forEach(chartData=>{
+    const wrapper=document.createElement("div");
+    wrapper.className="item";
+    wrapper.dataset.dashboardKind="distribution";
+    wrapper.dataset.dashboardLocation=chartData.location;
+    wrapper.style.margin="10px auto";
+    wrapper.style.maxWidth="100%%";
+
+    const title=document.createElement("h3");
+    title.textContent=chartData.location+" ("+chartData.height+"m) - "+chartData.series+" "+(chartData.chartType==="histogram"?"Histogram":"CDF");
+    title.style.marginTop="0";
+    wrapper.appendChild(title);
+
+    const chartDiv=document.createElement("div");
+    chartDiv.id=chartData.chartID;
+    chartDiv.style.width="100%%";
+    chartDiv.style.height="400px";
+    wrapper.appendChild(chartDiv);
+
+    container.appendChild(wrapper);
+   });
+
+   // Charts initialisieren
+   if(typeof window.distributionChartsInit==="function"){
+    window.distributionChartsInit();
+   }
+  }catch(e){
+   console.error("Fehler beim Laden der Verteilungs-Charts:",e);
+   emptyMsg.hidden=false;
+  }
+ }
+
+ // Intersection Observer für lazy loading beim Scrollen
+ const observer=new IntersectionObserver((entries)=>{
+  entries.forEach(entry=>{
+   if(entry.isIntersecting){
+    const section=document.getElementById("distribution-section");
+    if(section&&!section.dataset.loaded){
+     section.dataset.loaded="true";
+     // Charts laden wenn Sektion sichtbar wird
+     const chosen=selected();
+     updateDistributionCharts(chosen);
+    }
+   }
+ },{threshold:0.1});
+
+ const distributionSection=document.getElementById("distribution-section");
+ if(distributionSection){
+  observer.observe(distributionSection);
+ }
 })();
 </script>`, windChartID, hellmannChartID, masterDashboardNoDataMessage)
 }

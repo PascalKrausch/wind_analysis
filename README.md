@@ -303,6 +303,11 @@ go run cmd/analyser/main.go
 
 Der Analysator liest die konfigurierte Datenbasis ein und erzeugt die entsprechenden statistischen Auswertungen und Visualisierungen.
 
+Neu: Umstellung der Visualisierung auf embedded html, anstelle von output files
+Starten des Servers mit: go run ./cmd/analyser serve --port 8080
+Anschließend http://localhost:8080 im Browser aufrufen
+
+
 ---
 
 ## ⚡ Performance und Skalierung
@@ -435,6 +440,13 @@ Die erzeugten Ausgaben werden unter folgendem Pfad gespeichert:
 ```text
 ./output
 ```
+
+Das Output-System wird zunächst für Backward Kompatibilität beibehalten
+Die neue Visualisierungsmethode basiert auf einem API-Server mit embedded HTML 
+Starten mit: go run ./cmd/analyser serve --port 8080
+Anschließend http://localhost:8080 im Browser öffnen
+
+Das aktuelle System ist noch roh, Verfeinerung der Downsampling-Logik und UX-Verbesserungen werden in naher Zunkunft vorgenommen
 
 ---
 
