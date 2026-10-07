@@ -112,6 +112,31 @@ body {
     height: 400px;
 }
 
+#distribution-results {
+    overflow-x: auto;
+}
+
+.distribution-result {
+    padding: 20px 0;
+    border-bottom: 1px solid #e5e7eb;
+}
+
+.distribution-result h3 {
+    margin-bottom: 12px;
+    font-size: 1rem;
+}
+
+.distribution-charts {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+    gap: 16px;
+}
+
+.distribution-chart {
+    width: 100%;
+    height: 340px;
+}
+
 #validation-table {
     overflow-x: auto;
 }
@@ -168,7 +193,8 @@ table tr:hover {
     }
 
     #wind-chart,
-    #hellmann-chart {
+    #hellmann-chart,
+    .distribution-chart {
         height: 300px;
     }
 }

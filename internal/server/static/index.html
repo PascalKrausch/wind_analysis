@@ -28,6 +28,18 @@
                 <input type="date" id="date-end">
             </div>
 
+            <div class="filter-group">
+                <label for="distribution-height">Verteilungshöhe:</label>
+                <select id="distribution-height">
+                    <option value="10">10 m</option>
+                    <option value="80">80 m</option>
+                    <option value="100" selected>100 m</option>
+                    <option value="120">120 m</option>
+                    <option value="180">180 m</option>
+                    <option value="200">200 m</option>
+                </select>
+            </div>
+
             <button id="load-btn">Daten laden</button>
         </section>
 
@@ -44,6 +56,20 @@
         <section class="chart-section">
             <h2>Validierungsmetriken</h2>
             <div id="validation-table"></div>
+        </section>
+
+        <section class="chart-section">
+            <h2>Verteilungsanalyse</h2>
+            <div id="distribution-results">
+                <p class="hint">Verteilungen werden zusammen mit den anderen Analysen geladen.</p>
+            </div>
+        </section>
+
+        <section class="chart-section">
+            <h2>Hellmann-Exponent Verteilung</h2>
+            <div id="hellmann-distribution-results">
+                <p class="hint">Hellmann-Verteilungen werden zusammen mit den anderen Analysen geladen.</p>
+            </div>
         </section>
     </div>
 

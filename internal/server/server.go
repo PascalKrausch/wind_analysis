@@ -39,6 +39,7 @@ func (s *Server) setupRoutes() {
 	s.router.HandleFunc("POST /api/timeseries", s.handleTimeSeries)
 	s.router.HandleFunc("POST /api/distributions", s.handleDistributions)
 	s.router.HandleFunc("POST /api/validation", s.handleValidation)
+	s.router.HandleFunc("POST /api/hellmann-distributions", s.handleHellmannDistributions)
 }
 
 func Start(db *database.DB, port string) error {

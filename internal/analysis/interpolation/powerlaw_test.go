@@ -10,23 +10,23 @@ import (
 
 func TestCalculateHellmannExponent(t *testing.T) {
 	tests := []struct {
-		name string
+		name           string
 		v1, v2, h1, h2 float64
-		expected float64
+		expected       float64
 	}{
 		{
 			name: "Normal case",
-			v1: 3.0, v2: 4.0, h1: 10, h2: 100,
+			v1:   3.0, v2: 4.0, h1: 10, h2: 100,
 			expected: math.Log(4.0/3.0) / math.Log(100.0/10.0),
 		},
 		{
 			name: "Zero velocity",
-			v1: 0, v2: 4.0, h1: 10, h2: 100,
+			v1:   0, v2: 4.0, h1: 10, h2: 100,
 			expected: math.NaN(),
 		},
 		{
 			name: "Negative velocity",
-			v1: -1.0, v2: 4.0, h1: 10, h2: 100,
+			v1:   -1.0, v2: 4.0, h1: 10, h2: 100,
 			expected: math.NaN(),
 		},
 	}
@@ -49,17 +49,17 @@ func TestCalculateHellmannExponent(t *testing.T) {
 
 func TestInterpolateWindSpeed(t *testing.T) {
 	tests := []struct {
-		name string
+		name                          string
 		v_ref, h_ref, h_target, alpha float64
-		expected float64
+		expected                      float64
 	}{
 		{
-			name: "Normal case",
+			name:  "Normal case",
 			v_ref: 3.0, h_ref: 10, h_target: 100, alpha: 0.15,
 			expected: 3.0 * math.Pow(100.0/10.0, 0.15),
 		},
 		{
-			name: "Zero reference velocity",
+			name:  "Zero reference velocity",
 			v_ref: 0, h_ref: 10, h_target: 100, alpha: 0.15,
 			expected: math.NaN(),
 		},
@@ -84,7 +84,7 @@ func TestInterpolateWindSpeed(t *testing.T) {
 func TestCalculateHellmannExponentsForDataset(t *testing.T) {
 	records := []models.WindRecord{
 		{
-			Time: time.Date(2022, 1, 1, 12, 0, 0, 0, time.UTC),
+			Time:     time.Date(2022, 1, 1, 12, 0, 0, 0, time.UTC),
 			Location: models.Location{Name: "TestLocation"},
 			WindData: models.WindData{
 				WindSpeed_10m:  func(v float64) *float64 { return &v }(3.0),
@@ -92,7 +92,7 @@ func TestCalculateHellmannExponentsForDataset(t *testing.T) {
 			},
 		},
 		{
-			Time: time.Date(2022, 1, 1, 13, 0, 0, 0, time.UTC),
+			Time:     time.Date(2022, 1, 1, 13, 0, 0, 0, time.UTC),
 			Location: models.Location{Name: "TestLocation"},
 			WindData: models.WindData{
 				WindSpeed_10m:  func(v float64) *float64 { return &v }(2.5),
@@ -100,7 +100,7 @@ func TestCalculateHellmannExponentsForDataset(t *testing.T) {
 			},
 		},
 		{
-			Time: time.Date(2022, 1, 1, 14, 0, 0, 0, time.UTC),
+			Time:     time.Date(2022, 1, 1, 14, 0, 0, 0, time.UTC),
 			Location: models.Location{Name: "TestLocation"},
 			WindData: models.WindData{
 				WindSpeed_10m:  func(v float64) *float64 { return &v }(0), // Invalid
@@ -131,7 +131,7 @@ func TestValidatePowerLawModel(t *testing.T) {
 
 	records := []models.WindRecord{
 		{
-			Time: time.Date(2022, 1, 1, 12, 0, 0, 0, time.UTC),
+			Time:     time.Date(2022, 1, 1, 12, 0, 0, 0, time.UTC),
 			Location: models.Location{Name: "TestLocation"},
 			WindData: models.WindData{
 				WindSpeed_10m:  func(v float64) *float64 { return &v }(v10m),
@@ -168,41 +168,6 @@ func TestValidatePowerLawModel(t *testing.T) {
 		if result.SampleCount == 0 {
 			t.Errorf("Sample count should be positive for height %v", height)
 		}
-	}
-}
-
-func TestCalculateMAE(t *testing.T) {
-	predicted := []float64{1.0, 2.0, 3.0}
-	actual := []float64{1.1, 2.1, 2.9}
-
-	mae := calculateMAE(predicted, actual)
-	expected := (0.1 + 0.1 + 0.1) / 3.0
-
-	if math.Abs(mae-expected) > 1e-10 {
-		t.Errorf("Expected %v, got %v", expected, mae)
-	}
-}
-
-func TestCalculateRMSE(t *testing.T) {
-	predicted := []float64{1.0, 2.0, 3.0}
-	actual := []float64{1.0, 2.0, 3.0}
-
-	rmse := calculateRMSE(predicted, actual)
-
-	if rmse != 0 {
-		t.Errorf("Expected 0 for perfect match, got %v", rmse)
-	}
-}
-
-func TestCalculateCorrelation(t *testing.T) {
-	// Perfect positive correlation
-	predicted := []float64{1.0, 2.0, 3.0}
-	actual := []float64{2.0, 4.0, 6.0}
-
-	corr := calculateCorrelation(predicted, actual)
-
-	if math.Abs(corr-1.0) > 1e-10 {
-		t.Errorf("Expected correlation close to 1.0, got %v", corr)
 	}
 }
 

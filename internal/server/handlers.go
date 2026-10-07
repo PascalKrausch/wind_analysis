@@ -2,6 +2,7 @@ package server
 
 import (
 	"encoding/json"
+	"fmt"
 	"math"
 	"net/http"
 	"os"
@@ -9,13 +10,16 @@ import (
 
 	"gopkg.in/yaml.v3"
 
+	"wind_analysis/internal/analysis/distribution"
+	"wind_analysis/internal/analysis/fitting"
+	"wind_analysis/internal/analysis/statistics"
 	"wind_analysis/models"
 )
 
 type LocationResponse struct {
-	Name     string  `json:"name"`
-	Lat      float64 `json:"lat"`
-	Lon      float64 `json:"lon"`
+	Name string  `json:"name"`
+	Lat  float64 `json:"lat"`
+	Lon  float64 `json:"lon"`
 }
 
 func (s *Server) handleLocations(w http.ResponseWriter, r *http.Request) {
@@ -75,17 +79,37 @@ func (s *Server) handleTimeSeries(w http.ResponseWriter, r *http.Request) {
 
 type DistributionRequest struct {
 	Locations []string `json:"locations"`
+	StartDate string   `json:"startDate"`
+	EndDate   string   `json:"endDate"`
 	HeightM   int      `json:"heightM"`
 }
 
+type DistributionPoint struct {
+	X float64 `json:"x"`
+	Y float64 `json:"y"`
+}
+
+type DistributionBin struct {
+	Lower float64 `json:"lower"`
+	Upper float64 `json:"upper"`
+	Count int     `json:"count"`
+}
+
 type DistributionResponse struct {
-	Location string  `json:"location"`
-	HeightM  int     `json:"heightM"`
-	Histogram []struct {
-		Lower float64 `json:"lower"`
-		Upper float64 `json:"upper"`
-		Count int     `json:"count"`
-	} `json:"histogram"`
+	Location      string              `json:"location"`
+	HeightM       int                 `json:"heightM"`
+	ModelName     string              `json:"modelName"`
+	Parameters    []float64           `json:"parameters"`
+	SampleCount   int                 `json:"sampleCount"`
+	LogLikelihood float64             `json:"logLikelihood"`
+	AIC           float64             `json:"aic"`
+	BIC           float64             `json:"bic"`
+	KSStatistic   float64             `json:"ksStatistic"`
+	RMSE          float64             `json:"rmse"`
+	Histogram     []DistributionBin   `json:"histogram"`
+	EmpiricalCDF  []DistributionPoint `json:"empiricalCDF"`
+	FittedPDF     []DistributionPoint `json:"fittedPDF"`
+	FittedCDF     []DistributionPoint `json:"fittedCDF"`
 }
 
 func (s *Server) handleDistributions(w http.ResponseWriter, r *http.Request) {
@@ -95,10 +119,108 @@ func (s *Server) handleDistributions(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Placeholder - Verteilungs-Fits sind komplexer und erfordern
-	// die Integration mit fitting package. Für jetzt leer.
+	startDate, err := time.Parse("2006-01-02", req.StartDate)
+	if err != nil {
+		http.Error(w, "Ungültiges Startdatum; erwartet wird YYYY-MM-DD", http.StatusBadRequest)
+		return
+	}
+	endDate, err := time.Parse("2006-01-02", req.EndDate)
+	if err != nil || endDate.Before(startDate) {
+		http.Error(w, "Ungültiges Enddatum; es muss im Format YYYY-MM-DD und nicht vor dem Startdatum liegen", http.StatusBadRequest)
+		return
+	}
+	spec, ok := distributionHeightSpec(req.HeightM)
+	if !ok {
+		http.Error(w, "Ungültige Höhe; erlaubt sind 10, 80, 100, 120, 180 oder 200 Meter", http.StatusBadRequest)
+		return
+	}
+	if len(req.Locations) == 0 {
+		http.Error(w, "Mindestens ein Standort muss ausgewählt werden", http.StatusBadRequest)
+		return
+	}
+
+	fitters := []distribution.Fitter{
+		distribution.WeibullFitter{},
+		distribution.LogNormalFitter{},
+		distribution.GammaFitter{},
+	}
+	results := make([]DistributionResponse, 0, len(req.Locations))
+	for _, location := range req.Locations {
+		records, err := s.db.LoadWindData(r.Context(), location, req.StartDate, req.EndDate)
+		if err != nil {
+			http.Error(w, fmt.Sprintf("Winddaten für %s konnten nicht geladen werden: %v", location, err), http.StatusInternalServerError)
+			return
+		}
+
+		inputs, err := fitting.FindBestFitsForLocation(location, records, fitters, []fitting.HeightSpec{spec})
+		if err != nil {
+			http.Error(w, fmt.Sprintf("Verteilungsanalyse für %s fehlgeschlagen: %v", location, err), http.StatusUnprocessableEntity)
+			return
+		}
+		for _, input := range inputs {
+			results = append(results, distributionResponseFromFit(input))
+		}
+	}
+
+	data, err := json.Marshal(results)
+	if err != nil {
+		http.Error(w, "Verteilungsanalyse konnte nicht serialisiert werden", http.StatusInternalServerError)
+		return
+	}
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode([]DistributionResponse{})
+	w.Write(data)
+}
+
+func distributionHeightSpec(height int) (fitting.HeightSpec, bool) {
+	for _, spec := range fitting.DefaultHeightSpecs {
+		if spec.HeightM == height {
+			return spec, true
+		}
+	}
+	return fitting.HeightSpec{}, false
+}
+
+func distributionResponseFromFit(input fitting.AnalysisPlotInput) DistributionResponse {
+	response := DistributionResponse{
+		Location:      input.LocationName,
+		HeightM:       input.HeightM,
+		ModelName:     input.FitterName,
+		Parameters:    input.Model.Params(),
+		SampleCount:   input.Metrics.SampleSize,
+		LogLikelihood: input.Metrics.LogLikelihood,
+		AIC:           input.Metrics.AIC,
+		BIC:           input.Metrics.BIC,
+		KSStatistic:   input.Metrics.KSStatistic,
+		RMSE:          input.Metrics.RMSE,
+		Histogram:     make([]DistributionBin, 0, len(input.Histogram)),
+		EmpiricalCDF:  mapCDFPoints(input.EmpiricalCDF),
+		FittedPDF:     mapDensityPoints(input.FittedPDF),
+		FittedCDF:     mapCDFPoints(input.FittedCDF),
+	}
+	for _, bin := range input.Histogram {
+		response.Histogram = append(response.Histogram, DistributionBin{
+			Lower: bin.Min,
+			Upper: bin.Max,
+			Count: bin.Count,
+		})
+	}
+	return response
+}
+
+func mapDensityPoints(points []statistics.DensityPoint) []DistributionPoint {
+	result := make([]DistributionPoint, len(points))
+	for i, point := range points {
+		result[i] = DistributionPoint{X: point.X, Y: point.Y}
+	}
+	return result
+}
+
+func mapCDFPoints(points []statistics.CDFPoint) []DistributionPoint {
+	result := make([]DistributionPoint, len(points))
+	for i, point := range points {
+		result[i] = DistributionPoint{X: point.X, Y: point.Y}
+	}
+	return result
 }
 
 type ValidationRequest struct {
@@ -157,6 +279,149 @@ func (s *Server) handleValidation(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(results)
+}
+
+type HellmannDistributionRequest struct {
+	Locations []string `json:"locations"`
+	StartDate string   `json:"startDate"` // YYYY-MM-DD
+	EndDate   string   `json:"endDate"`   // YYYY-MM-DD
+	GroupBy   string   `json:"groupBy"`   // optional: "location" oder "all" (default: "all")
+}
+
+type HellmannDistributionResponse struct {
+	Location      string              `json:"location"` // leer bei GroupBy="all"
+	ModelName     string              `json:"modelName"`
+	Parameters    []float64           `json:"parameters"`
+	SampleCount   int                 `json:"sampleCount"`
+	LogLikelihood float64             `json:"logLikelihood"`
+	AIC           float64             `json:"aic"`
+	BIC           float64             `json:"bic"`
+	KSStatistic   float64             `json:"ksStatistic"`
+	RMSE          float64             `json:"rmse"`
+	Histogram     []DistributionBin   `json:"histogram"`
+	EmpiricalCDF  []DistributionPoint `json:"empiricalCDF"`
+	FittedPDF     []DistributionPoint `json:"fittedPDF"`
+	FittedCDF     []DistributionPoint `json:"fittedCDF"`
+}
+
+func (s *Server) handleHellmannDistributions(w http.ResponseWriter, r *http.Request) {
+	var req HellmannDistributionRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	// Validierung
+	if err := validateHellmannRequest(req); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	// Berechnung (delegiert an analysis layer)
+	results := make([]HellmannDistributionResponse, 0)
+	for _, location := range req.Locations {
+		records, err := s.db.LoadWindData(r.Context(), location, req.StartDate, req.EndDate)
+		if err != nil {
+			continue // oder error je nach Anforderung
+		}
+
+		// Aufruf der Business-Logik
+		fitters := []distribution.Fitter{
+			distribution.WeibullFitter{},
+			distribution.LogNormalFitter{},
+			distribution.GammaFitter{},
+		}
+		fitResult, err := fitting.FitHellmannDistribution(location, records, fitters)
+		if err != nil {
+			continue
+		}
+
+		// Response formatieren
+		results = append(results, hellmannResponseFromFit(fitResult))
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(results)
+}
+
+func validateHellmannRequest(req HellmannDistributionRequest) error {
+	if len(req.Locations) == 0 {
+		return fmt.Errorf("mindestens ein Standort muss ausgewählt werden")
+	}
+
+	if req.StartDate == "" {
+		return fmt.Errorf("Startdatum ist erforderlich")
+	}
+
+	if req.EndDate == "" {
+		return fmt.Errorf("Enddatum ist erforderlich")
+	}
+
+	startDate, err := time.Parse("2006-01-02", req.StartDate)
+	if err != nil {
+		return fmt.Errorf("ungültiges Startdatum; erwartet wird YYYY-MM-DD")
+	}
+
+	endDate, err := time.Parse("2006-01-02", req.EndDate)
+	if err != nil {
+		return fmt.Errorf("ungültiges Enddatum; erwartet wird YYYY-MM-DD")
+	}
+
+	if endDate.Before(startDate) {
+		return fmt.Errorf("Enddatum muss nach dem Startdatum liegen")
+	}
+
+	if req.GroupBy != "" && req.GroupBy != "location" && req.GroupBy != "all" {
+		return fmt.Errorf("groupBy muss entweder 'location' oder 'all' sein")
+	}
+
+	return nil
+}
+
+func hellmannResponseFromFit(fitResult fitting.HellmannFitResult) HellmannDistributionResponse {
+	// Extrahiere Modellnamen aus dem Verteilungstyp durch Type Assertion
+	modelName := getDistributionName(fitResult.Model)
+
+	response := HellmannDistributionResponse{
+		Location:      fitResult.LocationName,
+		ModelName:     modelName,
+		Parameters:    fitResult.Model.Params(),
+		SampleCount:   fitResult.Metrics.SampleSize,
+		LogLikelihood: fitResult.Metrics.LogLikelihood,
+		AIC:           fitResult.Metrics.AIC,
+		BIC:           fitResult.Metrics.BIC,
+		KSStatistic:   fitResult.Metrics.KSStatistic,
+		RMSE:          fitResult.Metrics.RMSE,
+		Histogram:     make([]DistributionBin, 0, len(fitResult.Histogram)),
+		EmpiricalCDF:  mapCDFPoints(fitResult.EmpiricalCDF),
+		FittedPDF:     mapDensityPoints(fitResult.FittedPDF),
+		FittedCDF:     mapCDFPoints(fitResult.FittedCDF),
+	}
+	for _, bin := range fitResult.Histogram {
+		response.Histogram = append(response.Histogram, DistributionBin{
+			Lower: bin.Min,
+			Upper: bin.Max,
+			Count: bin.Count,
+		})
+	}
+	return response
+}
+
+func getDistributionName(dist distribution.ContinuousDistribution) string {
+	switch dist.(type) {
+	case distribution.Weibull:
+		return "Weibull"
+	case distribution.LogNormal:
+		return "LogNormal"
+	case distribution.Gamma:
+		return "Gamma"
+	case distribution.Normal:
+		return "Normal"
+	case distribution.Beta:
+		return "Beta"
+	default:
+		return "Unknown"
+	}
 }
 
 type HellmannExponentResult struct {

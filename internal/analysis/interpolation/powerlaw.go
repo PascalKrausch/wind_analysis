@@ -7,6 +7,7 @@ import (
 
 	"gonum.org/v1/gonum/stat"
 
+	"wind_analysis/internal/analysis/statistics"
 	"wind_analysis/internal/database"
 	"wind_analysis/models"
 )
@@ -218,9 +219,9 @@ func finalizeValidationStats(heightMap map[float64]ValidationStats) {
 		if stats.SampleCount == 0 {
 			continue
 		}
-		stats.MeanAbsoluteError = calculateMAE(stats.PredictedValues, stats.ActualValues)
-		stats.RootMeanSquareError = calculateRMSE(stats.PredictedValues, stats.ActualValues)
-		stats.Correlation = calculateCorrelation(stats.PredictedValues, stats.ActualValues)
+		stats.MeanAbsoluteError = statistics.CalculateMAE(stats.PredictedValues, stats.ActualValues)
+		stats.RootMeanSquareError = statistics.CalculateRMSE(stats.PredictedValues, stats.ActualValues)
+		stats.Correlation = statistics.CalculateCorrelation(stats.PredictedValues, stats.ActualValues)
 
 		stats.PredictedSummary = calculateDescriptiveStats(stats.PredictedValues)
 		stats.ActualSummary = calculateDescriptiveStats(stats.ActualValues)
@@ -402,34 +403,12 @@ func getWindSpeedAtHeight(windData models.WindData, height float64) *float64 {
 	}
 }
 
-func calculateMAE(predicted, actual []float64) float64 {
-	if len(predicted) != len(actual) || len(predicted) == 0 {
-		return math.NaN()
+// Extrahiere Alpha-Werte aus Records für API/CLI
+func ExtractAlphasFromRecords(records []models.WindRecord) []float64 {
+	results := CalculateHellmannExponentsForDataset(records)
+	alphas := make([]float64, len(results))
+	for i, r := range results {
+		alphas[i] = r.Alpha
 	}
-
-	errs := make([]float64, len(predicted))
-	for i := range predicted {
-		errs[i] = math.Abs(predicted[i] - actual[i])
-	}
-	return stat.Mean(errs, nil)
-}
-
-func calculateRMSE(predicted, actual []float64) float64 {
-	if len(predicted) != len(actual) || len(predicted) == 0 {
-		return math.NaN()
-	}
-
-	sq := make([]float64, len(predicted))
-	for i := range predicted {
-		diff := predicted[i] - actual[i]
-		sq[i] = diff * diff
-	}
-	return math.Sqrt(stat.Mean(sq, nil))
-}
-
-func calculateCorrelation(predicted, actual []float64) float64 {
-	if len(predicted) != len(actual) || len(predicted) == 0 {
-		return math.NaN()
-	}
-	return stat.Correlation(predicted, actual, nil)
+	return alphas
 }

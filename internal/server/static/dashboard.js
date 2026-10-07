@@ -2,6 +2,8 @@ const API_BASE = '/api';
 
 let windChart = null;
 let hellmannChart = null;
+let distributionCharts = [];
+let hellmannDistributionCharts = [];
 
 async function loadLocations() {
     try {
@@ -97,7 +99,7 @@ function renderWindChart(data) {
         tooltip: {
             trigger: 'axis',
             formatter: function(params) {
-                let result = params[0].axisValue + '<br/>';
+                let result = params[0].axisValueLabel + '<br/>';
                 params.forEach(param => {
                     result += `${param.marker} ${param.seriesName}: ${param.value[1].toFixed(2)} m/s<br/>`;
                 });
@@ -139,7 +141,7 @@ function renderHellmannChart(data) {
         tooltip: {
             trigger: 'axis',
             formatter: function(params) {
-                let result = params[0].axisValue + '<br/>';
+                let result = params[0].axisValueLabel + '<br/>';
                 params.forEach(param => {
                     result += `${param.marker} ${param.seriesName}: ${param.value[1].toFixed(4)}<br/>`;
                 });
@@ -202,6 +204,298 @@ async function loadValidation() {
     }
 }
 
+async function loadDistributions() {
+    const locations = Array.from(document.getElementById('locations').selectedOptions)
+        .map(opt => opt.value);
+    const container = document.getElementById('distribution-results');
+
+    if (locations.length === 0) {
+        container.innerHTML = '<p class="hint">Bitte mindestens einen Standort auswählen.</p>';
+        return;
+    }
+
+    try {
+        const res = await fetch(`${API_BASE}/distributions`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                locations,
+                startDate: document.getElementById('date-start').value,
+                endDate: document.getElementById('date-end').value,
+                heightM: Number(document.getElementById('distribution-height').value)
+            })
+        });
+
+        if (!res.ok) {
+            throw new Error((await res.text()).trim() || `HTTP error! status: ${res.status}`);
+        }
+
+        renderDistributions(await res.json());
+    } catch (error) {
+        console.error('Fehler beim Laden der Verteilungsanalysen:', error);
+        container.textContent = 'Fehler beim Laden der Verteilungsanalysen: ' + error.message;
+    }
+}
+
+async function loadHellmannDistributions() {
+    const locations = Array.from(document.getElementById('locations').selectedOptions)
+        .map(opt => opt.value);
+    const container = document.getElementById('hellmann-distribution-results');
+
+    if (locations.length === 0) {
+        if (container) {
+            container.innerHTML = '<p class="hint">Bitte mindestens einen Standort auswählen.</p>';
+        }
+        return;
+    }
+
+    try {
+        const res = await fetch(`${API_BASE}/hellmann-distributions`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                locations,
+                startDate: document.getElementById('date-start').value,
+                endDate: document.getElementById('date-end').value,
+                groupBy: 'location'
+            })
+        });
+
+        if (!res.ok) {
+            throw new Error((await res.text()).trim() || `HTTP error! status: ${res.status}`);
+        }
+
+        renderHellmannDistributions(await res.json());
+    } catch (error) {
+        console.error('Fehler beim Laden der Hellmann-Verteilungsanalysen:', error);
+        if (container) {
+            container.textContent = 'Fehler beim Laden der Hellmann-Verteilungsanalysen: ' + error.message;
+        }
+    }
+}
+
+function renderHellmannDistributions(data) {
+    const container = document.getElementById('hellmann-distribution-results');
+    if (!container) {
+        console.error('Container für Hellmann-Verteilungen nicht gefunden');
+        return;
+    }
+
+    // Bestehende Charts aufräumen
+    hellmannDistributionCharts.forEach(chart => chart.dispose());
+    hellmannDistributionCharts = [];
+
+    container.replaceChildren();
+
+    if (!data || data.length === 0) {
+        container.innerHTML = '<p class="hint">Keine Hellmann-Verteilungsanalysen für die Auswahl verfügbar.</p>';
+        return;
+    }
+
+    const table = document.createElement('table');
+    table.innerHTML = '<thead><tr><th>Standort</th><th>Bestes Modell</th><th>Stichproben</th><th>AIC</th><th>BIC</th><th>KS</th><th>RMSE</th></tr></thead>';
+    const tbody = document.createElement('tbody');
+
+    data.forEach((result, index) => {
+        const row = document.createElement('tr');
+        [
+            result.location,
+            result.modelName,
+            result.sampleCount,
+            result.aic.toFixed(2),
+            result.bic.toFixed(2),
+            result.ksStatistic.toFixed(4),
+            result.rmse.toFixed(4)
+        ].forEach(value => {
+            const cell = document.createElement('td');
+            cell.textContent = value;
+            row.appendChild(cell);
+        });
+        tbody.appendChild(row);
+
+        const card = document.createElement('article');
+        card.className = 'distribution-result';
+        const heading = document.createElement('h3');
+        heading.textContent = `${result.location} – ${result.modelName} (Hellmann-Exponent)`;
+        card.appendChild(heading);
+
+        const charts = document.createElement('div');
+        charts.className = 'distribution-charts';
+        const histogram = document.createElement('div');
+        histogram.className = 'distribution-chart';
+        histogram.id = `hellmann-histogram-${index}`;
+        const cdf = document.createElement('div');
+        cdf.className = 'distribution-chart';
+        cdf.id = `hellmann-cdf-${index}`;
+        charts.append(histogram, cdf);
+        card.appendChild(charts);
+        container.appendChild(card);
+
+        const histogramChart = echarts.init(histogram);
+        histogramChart.setOption({
+            title: { text: 'Histogramm und angepasste Dichte' },
+            tooltip: { trigger: 'axis' },
+            legend: { data: ['Häufigkeit', `${result.modelName}-PDF`] },
+            xAxis: { type: 'value', name: 'Hellmann-Exponent α' },
+            yAxis: [
+                { type: 'value', name: 'Häufigkeit' },
+                { type: 'value', name: 'Dichte', min: 0 }
+            ],
+            series: [
+                {
+                    name: 'Häufigkeit',
+                    type: 'bar',
+                    data: result.histogram.map(bin => [(bin.lower + bin.upper) / 2, bin.count])
+                },
+                {
+                    name: `${result.modelName}-PDF`,
+                    type: 'line',
+                    yAxisIndex: 1,
+                    showSymbol: false,
+                    data: result.fittedPDF.map(point => [point.x, point.y])
+                }
+            ],
+            grid: { left: '12%', right: '12%', bottom: '15%' }
+        });
+
+        const cdfChart = echarts.init(cdf);
+        cdfChart.setOption({
+            title: { text: 'Empirische und angepasste CDF' },
+            tooltip: { trigger: 'axis' },
+            legend: { data: ['Empirisch', `${result.modelName}-Modell`] },
+            xAxis: { type: 'value', name: 'Hellmann-Exponent α' },
+            yAxis: { type: 'value', name: 'Kumulative Wahrscheinlichkeit', min: 0, max: 1 },
+            series: [
+                {
+                    name: 'Empirisch',
+                    type: 'line',
+                    showSymbol: false,
+                    data: result.empiricalCDF.map(point => [point.x, point.y])
+                },
+                {
+                    name: `${result.modelName}-Modell`,
+                    type: 'line',
+                    showSymbol: false,
+                    data: result.fittedCDF.map(point => [point.x, point.y])
+                }
+            ],
+            grid: { left: '12%', right: '5%', bottom: '15%' }
+        });
+        hellmannDistributionCharts.push(histogramChart, cdfChart);
+    });
+
+    table.appendChild(tbody);
+    container.prepend(table);
+}
+
+function renderDistributions(data) {
+    const container = document.getElementById('distribution-results');
+    distributionCharts.forEach(chart => chart.dispose());
+    distributionCharts = [];
+    container.replaceChildren();
+
+    if (!data || data.length === 0) {
+        container.innerHTML = '<p class="hint">Keine Verteilungsanalysen für die Auswahl verfügbar.</p>';
+        return;
+    }
+
+    const table = document.createElement('table');
+    table.innerHTML = '<thead><tr><th>Standort</th><th>Höhe [m]</th><th>Bestes Modell</th><th>Stichproben</th><th>AIC</th><th>BIC</th><th>KS</th><th>RMSE</th></tr></thead>';
+    const tbody = document.createElement('tbody');
+
+    data.forEach((result, index) => {
+        const row = document.createElement('tr');
+        [
+            result.location,
+            result.heightM,
+            result.modelName,
+            result.sampleCount,
+            result.aic.toFixed(2),
+            result.bic.toFixed(2),
+            result.ksStatistic.toFixed(4),
+            result.rmse.toFixed(4)
+        ].forEach(value => {
+            const cell = document.createElement('td');
+            cell.textContent = value;
+            row.appendChild(cell);
+        });
+        tbody.appendChild(row);
+
+        const card = document.createElement('article');
+        card.className = 'distribution-result';
+        const heading = document.createElement('h3');
+        heading.textContent = `${result.location} – ${result.modelName} @ ${result.heightM} m`;
+        card.appendChild(heading);
+
+        const charts = document.createElement('div');
+        charts.className = 'distribution-charts';
+        const histogram = document.createElement('div');
+        histogram.className = 'distribution-chart';
+        histogram.id = `distribution-histogram-${index}`;
+        const cdf = document.createElement('div');
+        cdf.className = 'distribution-chart';
+        cdf.id = `distribution-cdf-${index}`;
+        charts.append(histogram, cdf);
+        card.appendChild(charts);
+        container.appendChild(card);
+
+        const histogramChart = echarts.init(histogram);
+        histogramChart.setOption({
+            title: { text: 'Histogramm und angepasste Dichte' },
+            tooltip: { trigger: 'axis' },
+            legend: { data: ['Häufigkeit', `${result.modelName}-PDF`] },
+            xAxis: { type: 'value', name: 'Windgeschwindigkeit [m/s]' },
+            yAxis: [
+                { type: 'value', name: 'Häufigkeit' },
+                { type: 'value', name: 'Dichte', min: 0 }
+            ],
+            series: [
+                {
+                    name: 'Häufigkeit',
+                    type: 'bar',
+                    data: result.histogram.map(bin => [(bin.lower + bin.upper) / 2, bin.count])
+                },
+                {
+                    name: `${result.modelName}-PDF`,
+                    type: 'line',
+                    yAxisIndex: 1,
+                    showSymbol: false,
+                    data: result.fittedPDF.map(point => [point.x, point.y])
+                }
+            ],
+            grid: { left: '12%', right: '12%', bottom: '15%' }
+        });
+
+        const cdfChart = echarts.init(cdf);
+        cdfChart.setOption({
+            title: { text: 'Empirische und angepasste CDF' },
+            tooltip: { trigger: 'axis' },
+            legend: { data: ['Empirisch', `${result.modelName}-Modell`] },
+            xAxis: { type: 'value', name: 'Windgeschwindigkeit [m/s]' },
+            yAxis: { type: 'value', name: 'Kumulative Wahrscheinlichkeit', min: 0, max: 1 },
+            series: [
+                {
+                    name: 'Empirisch',
+                    type: 'line',
+                    showSymbol: false,
+                    data: result.empiricalCDF.map(point => [point.x, point.y])
+                },
+                {
+                    name: `${result.modelName}-Modell`,
+                    type: 'line',
+                    showSymbol: false,
+                    data: result.fittedCDF.map(point => [point.x, point.y])
+                }
+            ],
+            grid: { left: '12%', right: '5%', bottom: '15%' }
+        });
+        distributionCharts.push(histogramChart, cdfChart);
+    });
+
+    table.appendChild(tbody);
+    container.prepend(table);
+}
+
 function renderValidationTable(data) {
     const container = document.getElementById('validation-table');
 
@@ -243,6 +537,8 @@ document.getElementById('load-btn').addEventListener('click', async () => {
             renderHellmannChart(hellmannData);
         }
 
+        await loadDistributions();
+        await loadHellmannDistributions();
         await loadValidation();
     } finally {
         btn.disabled = false;
@@ -254,6 +550,8 @@ document.getElementById('load-btn').addEventListener('click', async () => {
 window.addEventListener('resize', () => {
     if (windChart) windChart.resize();
     if (hellmannChart) hellmannChart.resize();
+    distributionCharts.forEach(chart => chart.resize());
+    hellmannDistributionCharts.forEach(chart => chart.resize());
 });
 
 // Initialisierung
